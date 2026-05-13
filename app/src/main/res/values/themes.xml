@@ -1,0 +1,9 @@
+<!-- File: app/src/main/res/values/themes.xml -->
+<!-- Base theme for XML compatibility (Compose handles actual theming) -->
+<resources>
+    <style name="Theme.MyAIAssistant" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+    </style>
+</resources>

@@ -1,0 +1,7 @@
+<!-- File: app/src/main/res/values/strings.xml -->
+<resources>
+    <string name="app_name">MyAI Assistant</string>
+    <string name="accessibility_service_description">MyAI Assistant ko screen padhne aur apps control karne ke liye yeh service chahiye. Isse aapka assistant WhatsApp, YouTube, aur doosre apps ko aapke liye operate kar sakta hai.</string>
+    <string name="notification_channel_name">AI Assistant Service</string>
+    <string name="notification_channel_description">Background mein AI Assistant chalta rehta hai</string>
+</resources>
