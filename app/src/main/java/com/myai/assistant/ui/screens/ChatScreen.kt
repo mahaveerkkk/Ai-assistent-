@@ -243,6 +243,7 @@ fun ChatScreen(
                         ) {
                             Text("Scroll Up", fontSize = 10.sp)
                         }
+                    }
                     HorizontalDivider()
 
                     // System Controls section
