@@ -10,6 +10,7 @@ import android.content.Intent
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.myai.assistant.features.system.SystemControlManager
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +55,8 @@ class MyAccessibilityService : AccessibilityService() {
         private set
     lateinit var appAutomator: AppAutomator
         private set
+    lateinit var systemControlManager: SystemControlManager
+        private set
 
     // Coroutine scope for async operations
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -75,6 +78,7 @@ class MyAccessibilityService : AccessibilityService() {
         // Sub-modules initialize karo
         actionPerformer = ActionPerformer(this)
         appAutomator = AppAutomator(this, actionPerformer)
+        systemControlManager = SystemControlManager(this)
 
         // Service config programmatically set karo (XML config ke upar)
         serviceInfo = serviceInfo?.apply {
@@ -299,9 +303,40 @@ class MyAccessibilityService : AccessibilityService() {
                     appAutomator.searchGoogle(query)
                 }
                 "NOTIFICATIONS" -> actionPerformer.openNotifications()
+                "QUICK_SETTINGS" -> actionPerformer.openQuickSettings()
                 "FLASHLIGHT" -> {
-                    // TODO: Flashlight toggle via CameraManager
-                    false
+                    val enable = target?.equals("on", ignoreCase = true) ?: true
+                    systemControlManager.toggleFlashlight(enable)
+                }
+                "LOCK" -> actionPerformer.lockScreen()
+                "DND" -> {
+                    val mode = target ?: "silent"
+                    systemControlManager.toggleDnd(mode)
+                }
+                "WIFI" -> {
+                    val enable = target?.equals("on", ignoreCase = true) ?: true
+                    systemControlManager.toggleWifi(enable)
+                }
+                "BLUETOOTH" -> {
+                    val enable = target?.equals("on", ignoreCase = true) ?: true
+                    systemControlManager.toggleBluetooth(enable)
+                }
+                "VOLUME" -> {
+                    val dir = target ?: "up"
+                    systemControlManager.adjustVolume(dir)
+                }
+                "BRIGHTNESS" -> {
+                    val value = target?.toIntOrNull() ?: 128
+                    systemControlManager.setBrightness(value)
+                }
+                "MOBILE_DATA" -> systemControlManager.toggleMobileData()
+                "AIRPLANE" -> systemControlManager.toggleAirplaneMode()
+                "HOTSPOT" -> systemControlManager.toggleHotspot()
+                "SWIPE_LEFT" -> actionPerformer.swipeLeft()
+                "SWIPE_RIGHT" -> actionPerformer.swipeRight()
+                "POWER_DIALOG" -> actionPerformer.showPowerDialog()
+                "LONG_CLICK" -> {
+                    target?.let { actionPerformer.clickByText(it) } ?: false
                 }
                 else -> {
                     Log.w(TAG, "Unknown action: $action")

@@ -252,6 +252,151 @@ class AppAutomator(
     }
 
     // ═══════════════════════════════════════════════════════
+    // TELEGRAM AUTOMATION
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Telegram mein kisi ko message bhejo
+     */
+    suspend fun sendTelegramMessage(contact: String, message: String): Boolean {
+        try {
+            Log.d(TAG, "Telegram: Sending to $contact: $message")
+
+            // Open Telegram
+            openAppByPackage(PKG_TELEGRAM)
+            delay(2000)
+
+            // Search icon click
+            actionPerformer.clickByContentDescription("Search")
+                    ?: actionPerformer.clickByText("Search")
+            delay(1000)
+
+            // Contact name type karo
+            actionPerformer.typeInFirstField(contact)
+            delay(2000)
+
+            // Contact pe click karo
+            actionPerformer.clickByText(contact)
+            delay(1500)
+
+            // Message type karo
+            actionPerformer.typeInFirstField(message)
+            delay(500)
+
+            // Send button click
+            return actionPerformer.clickByContentDescription("Send")
+                    ?: actionPerformer.clickByText("Send")
+                    ?: false
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Telegram error: ${e.message}", e)
+            return false
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // INSTAGRAM AUTOMATION
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Instagram DM bhejo
+     */
+    suspend fun sendInstagramDM(contact: String, message: String): Boolean {
+        try {
+            Log.d(TAG, "Instagram: DM to $contact: $message")
+
+            // Instagram kholo
+            openAppByPackage(PKG_INSTAGRAM)
+            delay(2500)
+
+            // DM icon click (paper plane icon)
+            actionPerformer.clickByContentDescription("Direct")
+                    ?: actionPerformer.clickByContentDescription("Messenger")
+            delay(1500)
+
+            // Search mein contact dhundo
+            actionPerformer.clickByText("Search")
+                    ?: actionPerformer.clickByContentDescription("Search")
+            delay(1000)
+
+            actionPerformer.typeInFirstField(contact)
+            delay(2000)
+
+            // Contact pe click
+            actionPerformer.clickByText(contact)
+            delay(1500)
+
+            // Message type
+            actionPerformer.typeInFirstField(message)
+            delay(500)
+
+            // Send
+            return actionPerformer.clickByContentDescription("Send")
+                    ?: actionPerformer.clickByText("Send")
+                    ?: false
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Instagram DM error: ${e.message}", e)
+            return false
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // GOOGLE MAPS NAVIGATION
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Google Maps mein navigate karo
+     */
+    fun navigateTo(destination: String): Boolean {
+        return try {
+            val uri = Uri.parse("google.navigation:q=${Uri.encode(destination)}")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(PKG_MAPS)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            service.startActivity(intent)
+            Log.d(TAG, "🗺️ Navigating to: $destination")
+            true
+        } catch (e: Exception) {
+            // Fallback: open Maps with search
+            try {
+                val searchUri = Uri.parse("geo:0,0?q=${Uri.encode(destination)}")
+                val searchIntent = Intent(Intent.ACTION_VIEW, searchUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                service.startActivity(searchIntent)
+                true
+            } catch (ex: Exception) {
+                Log.e(TAG, "Maps error: ${ex.message}")
+                false
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
+    // PLAY STORE
+    // ═══════════════════════════════════════════════════════
+
+    /**
+     * Play Store mein app search karo
+     */
+    fun searchPlayStore(appName: String): Boolean {
+        return try {
+            val uri = Uri.parse("market://search?q=${Uri.encode(appName)}")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            service.startActivity(intent)
+            Log.d(TAG, "🏪 Play Store: searching '$appName'")
+            true
+        } catch (e: Exception) {
+            // Fallback: browser-based Play Store
+            openUrl("https://play.google.com/store/search?q=${Uri.encode(appName)}")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════
     // UTILITY ACTIONS
     // ═══════════════════════════════════════════════════════
 
@@ -274,3 +419,4 @@ class AppAutomator(
         return keywords.any { this.contains(it) }
     }
 }
+

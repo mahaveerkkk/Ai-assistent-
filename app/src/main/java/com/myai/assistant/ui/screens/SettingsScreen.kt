@@ -25,25 +25,31 @@ import androidx.compose.ui.unit.sp
 import com.myai.assistant.overlay.OverlayService
 import com.myai.assistant.service.AssistantForegroundService
 import com.myai.assistant.ui.theme.*
+import androidx.hilt.navigation.compose.hiltViewModel
+import com.myai.assistant.viewmodel.AssistantViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
+    viewModel: AssistantViewModel = hiltViewModel(),
     onBack: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+    val settings = viewModel.settings
 
-    // States
-    var ollamaUrl by remember { mutableStateOf("http://10.0.2.2:11434") }
-    var ollamaModel by remember { mutableStateOf("llama3") }
-    var geminiApiKey by remember { mutableStateOf(com.myai.assistant.BuildConfig.GEMINI_API_KEY) }
-    var useOllama by remember { mutableStateOf(true) }
-    var useGemini by remember { mutableStateOf(true) }
-    var voiceEnabled by remember { mutableStateOf(true) }
-    var floatingBubble by remember { mutableStateOf(false) }
-    var autoStartBoot by remember { mutableStateOf(true) }
-    var backgroundService by remember { mutableStateOf(false) }
+    // States initialized from settings repository
+    var ollamaUrl by remember { mutableStateOf(settings.ollamaUrl) }
+    var ollamaModel by remember { mutableStateOf(settings.ollamaModel) }
+    var geminiApiKey by remember { mutableStateOf(settings.geminiApiKey) }
+    var useOllama by remember { mutableStateOf(settings.useOllama) }
+    var useGemini by remember { mutableStateOf(settings.useGemini) }
+    var useLiteRt by remember { mutableStateOf(settings.useLiteRt) }
+    var liteRtModelPath by remember { mutableStateOf(settings.liteRtModelPath) }
+    var voiceEnabled by remember { mutableStateOf(settings.voiceEnabled) }
+    var floatingBubble by remember { mutableStateOf(settings.floatingBubble) }
+    var autoStartBoot by remember { mutableStateOf(settings.autoStartBoot) }
+    var backgroundService by remember { mutableStateOf(settings.backgroundService) }
 
     Scaffold(
         topBar = {
@@ -75,23 +81,58 @@ fun SettingsScreen(
             // ═══════════════════════════════════════
             SettingsSection(title = "🧠 AI Engine") {
                 SettingsToggle(
+                    icon = Icons.Filled.Memory,
+                    title = "LiteRT (On-Device AI)",
+                    subtitle = "Gemma/Qwen offline (Zero latency)",
+                    checked = useLiteRt,
+                    onToggle = {
+                        useLiteRt = it
+                        settings.useLiteRt = it
+                        viewModel.settings.useLiteRt = it
+                    }
+                )
+
+                if (useLiteRt) {
+                    SettingsTextField(
+                        label = "Model file path (.litertlm)",
+                        value = liteRtModelPath,
+                        onChange = {
+                            liteRtModelPath = it
+                            settings.liteRtModelPath = it
+                            viewModel.settings.liteRtModelPath = it
+                        }
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                SettingsToggle(
                     icon = Icons.Filled.Computer,
                     title = "Ollama (Local)",
                     subtitle = "Free, private, fast",
                     checked = useOllama,
-                    onToggle = { useOllama = it }
+                    onToggle = {
+                        useOllama = it
+                        viewModel.setUseOllama(it)
+                    }
                 )
 
                 if (useOllama) {
                     SettingsTextField(
                         label = "Ollama Server URL",
                         value = ollamaUrl,
-                        onChange = { ollamaUrl = it }
+                        onChange = {
+                            ollamaUrl = it
+                            viewModel.setOllamaUrl(it)
+                        }
                     )
                     SettingsTextField(
                         label = "Model Name",
                         value = ollamaModel,
-                        onChange = { ollamaModel = it }
+                        onChange = {
+                            ollamaModel = it
+                            viewModel.setOllamaModel(it)
+                        }
                     )
                 }
 
@@ -102,14 +143,20 @@ fun SettingsScreen(
                     title = "Gemini (Cloud)",
                     subtitle = "Google AI fallback",
                     checked = useGemini,
-                    onToggle = { useGemini = it }
+                    onToggle = {
+                        useGemini = it
+                        viewModel.setUseGemini(it)
+                    }
                 )
 
                 if (useGemini) {
                     SettingsTextField(
                         label = "Gemini API Key",
                         value = geminiApiKey,
-                        onChange = { geminiApiKey = it }
+                        onChange = {
+                            geminiApiKey = it
+                            viewModel.setGeminiApiKey(it)
+                        }
                     )
                 }
             }
@@ -123,7 +170,10 @@ fun SettingsScreen(
                     title = "Voice Response",
                     subtitle = "AI jawab bole",
                     checked = voiceEnabled,
-                    onToggle = { voiceEnabled = it }
+                    onToggle = {
+                        voiceEnabled = it
+                        viewModel.toggleVoiceOutput()
+                    }
                 )
             }
 
@@ -138,6 +188,7 @@ fun SettingsScreen(
                     checked = floatingBubble,
                     onToggle = {
                         floatingBubble = it
+                        settings.floatingBubble = it
                         if (it) OverlayService.start(context)
                         else OverlayService.stop(context)
                     }
@@ -150,6 +201,7 @@ fun SettingsScreen(
                     checked = backgroundService,
                     onToggle = {
                         backgroundService = it
+                        settings.backgroundService = it
                         if (it) AssistantForegroundService.start(context)
                         else AssistantForegroundService.stop(context)
                     }
@@ -162,6 +214,7 @@ fun SettingsScreen(
                     checked = autoStartBoot,
                     onToggle = {
                         autoStartBoot = it
+                        settings.autoStartBoot = it
                         context.getSharedPreferences("ai_prefs", 0)
                             .edit().putBoolean("auto_start_on_boot", it).apply()
                     }
@@ -174,7 +227,7 @@ fun SettingsScreen(
             SettingsSection(title = "ℹ️ About") {
                 SettingsInfo("App", "MyAI Assistant")
                 SettingsInfo("Version", "1.0.0")
-                SettingsInfo("AI Models", "Ollama + Gemini 2.0 Flash")
+                SettingsInfo("AI Models", "LiteRT (Gemma/Qwen) + Ollama + Gemini")
                 SettingsInfo("Developer", "Built with ❤️")
             }
 

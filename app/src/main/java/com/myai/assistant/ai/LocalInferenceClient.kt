@@ -1,0 +1,122 @@
+// File: app/src/main/java/com/myai/assistant/ai/LocalInferenceClient.kt
+// LiteRT Local Inference Client — Run Qwen/Gemma fully on-device offline
+
+package com.myai.assistant.ai
+
+import android.content.Context
+import android.util.Log
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.myai.assistant.ai.models.AiParsedResponse
+import com.myai.assistant.ai.models.AiResponseParser
+import com.myai.assistant.ai.models.AiSource
+import com.myai.assistant.data.repository.SettingsRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.reduce
+import kotlinx.coroutines.withContext
+import java.io.File
+import javax.inject.Inject
+import javax.inject.Singleton
+
+@Singleton
+class LocalInferenceClient @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val settingsRepository: SettingsRepository
+) : AutoCloseable {
+
+    companion object {
+        private const val TAG = "LocalInferenceClient"
+    }
+
+    private var engine: Engine? = null
+    private var isInitialized = false
+
+    /**
+     * 🧠 Initialize the local LiteRT-LM engine
+     * Model loading should only happen once as it takes several seconds
+     */
+    suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
+        if (isInitialized && engine != null) return@withContext true
+
+        val modelPath = settingsRepository.liteRtModelPath
+        val modelFile = File(modelPath)
+
+        if (!modelFile.exists()) {
+            Log.w(TAG, "❌ LiteRT model file not found at: $modelPath")
+            return@withContext false
+        }
+
+        try {
+            Log.d(TAG, "⏳ Initializing LiteRT-LM Engine with model: $modelPath...")
+            val config = EngineConfig(modelPath = modelPath)
+            val newEngine = Engine(config)
+            newEngine.initialize()
+            
+            engine = newEngine
+            isInitialized = true
+            Log.d(TAG, "✅ LiteRT-LM Engine initialized successfully!")
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ LiteRT-LM initialization failed: ${e.message}", e)
+            isInitialized = false
+            engine = null
+            false
+        }
+    }
+
+    /**
+     * 💬 Execute chat query locally on-device
+     */
+    suspend fun chat(prompt: String): AiParsedResponse = withContext(Dispatchers.Default) {
+        // Ensure engine is initialized
+        if (!isInitialized || engine == null) {
+            val initSuccess = initialize()
+            if (!initSuccess || engine == null) {
+                return@withContext AiResponseParser.errorResponse(
+                    "LiteRT-LM not initialized. Please verify model path in Settings.",
+                    AiSource.FALLBACK
+                )
+            }
+        }
+
+        try {
+            Log.d(TAG, "🧠 Running Local Inference...")
+            val currentEngine = engine!!
+            
+            // Create a conversation session
+            val conversation = currentEngine.createConversation()
+            
+            val responseBuilder = StringBuilder()
+            
+            // Collect the response stream from LiteRT-LM Async Flow
+            conversation.sendMessageAsync(prompt).collect { partialResponse ->
+                responseBuilder.append(partialResponse)
+            }
+            
+            val fullResponse = responseBuilder.toString().trim()
+            Log.d(TAG, "✅ Local Inference finished: $fullResponse")
+            
+            // Parse response into standard structure
+            val parsed = AiResponseParser.parse(fullResponse, AiSource.OLLAMA) // Reuse Ollama source identifier for local
+            parsed
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Local Inference failed: ${e.message}", e)
+            AiResponseParser.errorResponse("LiteRT error: ${e.message}", AiSource.FALLBACK)
+        }
+    }
+
+    /**
+     * Release system resources (GPU/CPU buffers)
+     */
+    override fun close() {
+        try {
+            engine?.close()
+            engine = null
+            isInitialized = false
+            Log.d(TAG, "🔌 LiteRT-LM Engine closed successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing LiteRT-LM: ${e.message}")
+        }
+    }
+}

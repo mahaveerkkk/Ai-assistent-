@@ -47,6 +47,7 @@ fun ChatScreen(
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
     var showMenu by remember { mutableStateOf(false) }
+    var showDiagnosticsDialog by remember { mutableStateOf(false) }
 
     // Auto-scroll jab naya message aaye
     LaunchedEffect(uiState.messages.size) {
@@ -75,6 +76,10 @@ fun ChatScreen(
                 onSettings = {
                     showMenu = false
                     onNavigateToSettings()
+                },
+                onDiagnostics = {
+                    showMenu = false
+                    showDiagnosticsDialog = true
                 }
             )
         }
@@ -137,6 +142,171 @@ fun ChatScreen(
             viewModel.dismissError()
         }
     }
+
+    // Diagnostics Dialog
+    if (showDiagnosticsDialog) {
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val isServiceRunning = com.myai.assistant.accessibility.MyAccessibilityService.isRunning()
+        var appNameInput by remember { mutableStateOf("WhatsApp") }
+
+        AlertDialog(
+            onDismissRequest = { showDiagnosticsDialog = false },
+            title = {
+                Text(
+                    text = "🔧 Diagnostic Controls",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Accessibility status row
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Accessibility Service:", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = if (isServiceRunning) "🟢 Active" else "🔴 Inactive (Click to Turn On)",
+                            fontWeight = FontWeight.Bold,
+                            color = if (isServiceRunning) SuccessColor else ErrorColor,
+                            modifier = Modifier
+                                .clickable {
+                                    if (!isServiceRunning) {
+                                        val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                    }
+                                }
+                                .padding(4.dp)
+                        )
+                    }
+
+                    HorizontalDivider()
+
+                    // Global simulation buttons
+                    Text("Global Gestures:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("BACK") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Back", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("HOME") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Home", fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("RECENTS") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Recents", fontSize = 12.sp)
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("NOTIFICATIONS") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Notifications", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("SCROLL_DOWN") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Scroll Down", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("SCROLL_UP") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Scroll Up", fontSize = 10.sp)
+                        }
+                    HorizontalDivider()
+
+                    // System Controls section
+                    Text("System Toggles:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("WIFI", "on") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("WiFi Panel", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("BLUETOOTH", "on") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("BT Toggle", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("VOLUME", "up") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Vol Up", fontSize = 10.sp)
+                        }
+                        Button(
+                            onClick = { viewModel.triggerDiagnosticAction("VOLUME", "down") },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(horizontal = 4.dp)
+                        ) {
+                            Text("Vol Down", fontSize = 10.sp)
+                        }
+                    }
+
+                    HorizontalDivider()
+
+                    // App Opener section
+                    Text("App Launch Test:", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    OutlinedTextField(
+                        value = appNameInput,
+                        onValueChange = { appNameInput = it },
+                        label = { Text("App Name") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                    Button(
+                        onClick = { viewModel.triggerDiagnosticAction("OPEN_APP", appNameInput) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Open App")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDiagnosticsDialog = false }) {
+                    Text("Done")
+                }
+            }
+        )
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -152,7 +322,8 @@ private fun ChatTopBar(
     showMenu: Boolean,
     onMenuToggle: () -> Unit,
     onClearChat: () -> Unit,
-    onSettings: () -> Unit = {}
+    onSettings: () -> Unit = {},
+    onDiagnostics: () -> Unit = {}
 ) {
     TopAppBar(
         title = {
@@ -226,6 +397,10 @@ private fun ChatTopBar(
                     DropdownMenuItem(
                         text = { Text("⚙️ Settings") },
                         onClick = onSettings
+                    )
+                    DropdownMenuItem(
+                        text = { Text("🔧 Diagnostics & Test") },
+                        onClick = onDiagnostics
                     )
                 }
             }

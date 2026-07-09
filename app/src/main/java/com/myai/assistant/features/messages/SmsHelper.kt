@@ -32,6 +32,11 @@ class SmsHelper @Inject constructor() {
      * SMS bhejo
      */
     fun sendSms(context: Context, phoneNumber: String, message: String): Boolean {
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS)
+            != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "SEND_SMS permission not granted")
+            return false
+        }
         return try {
             val smsManager = context.getSystemService(SmsManager::class.java)
             // Lambe messages ke liye multi-part

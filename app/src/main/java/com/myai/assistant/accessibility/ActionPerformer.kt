@@ -242,6 +242,18 @@ class ActionPerformer(
     // ═══════════════════════════════════════════════════════
 
     /**
+     * Get real screen dimensions from service context
+     */
+    private fun getScreenSize(): Pair<Int, Int> {
+        return try {
+            val metrics = service.resources.displayMetrics
+            Pair(metrics.widthPixels, metrics.heightPixels)
+        } catch (e: Exception) {
+            Pair(1080, 2400) // Fallback default
+        }
+    }
+
+    /**
      * Screen pe specific coordinates pe tap karo
      */
     fun tapAtCoordinates(x: Float, y: Float, durationMs: Long = 100): Boolean {
@@ -290,32 +302,37 @@ class ActionPerformer(
     /**
      * Screen pe neeche swipe karo (scroll up)
      */
-    fun swipeUp(screenWidth: Int = 1080, screenHeight: Int = 2400): Boolean {
-        val centerX = screenWidth / 2f
-        return swipe(centerX, screenHeight * 0.7f, centerX, screenHeight * 0.3f)
+    fun swipeUp(): Boolean {
+        val (w, h) = getScreenSize()
+        val centerX = w / 2f
+        return swipe(centerX, h * 0.7f, centerX, h * 0.3f)
     }
 
     /**
      * Screen pe upar swipe karo (scroll down)
      */
-    fun swipeDown(screenWidth: Int = 1080, screenHeight: Int = 2400): Boolean {
-        val centerX = screenWidth / 2f
-        return swipe(centerX, screenHeight * 0.3f, centerX, screenHeight * 0.7f)
+    fun swipeDown(): Boolean {
+        val (w, h) = getScreenSize()
+        val centerX = w / 2f
+        return swipe(centerX, h * 0.3f, centerX, h * 0.7f)
     }
 
     /**
      * Left swipe
      */
-    fun swipeLeft(screenWidth: Int = 1080, screenHeight: Int = 2400): Boolean {
-        val centerY = screenHeight / 2f
-        return swipe(screenWidth * 0.8f, centerY, screenWidth * 0.2f, centerY)
+    fun swipeLeft(): Boolean {
+        val (w, h) = getScreenSize()
+        val centerY = h / 2f
+        return swipe(w * 0.8f, centerY, w * 0.2f, centerY)
     }
 
     /**
      * Right swipe
      */
-    fun swipeRight(screenWidth: Int = 1080, screenHeight: Int = 2400): Boolean {
-        val centerY = screenHeight / 2f
-        return swipe(screenWidth * 0.2f, centerY, screenWidth * 0.8f, centerY)
+    fun swipeRight(): Boolean {
+        val (w, h) = getScreenSize()
+        val centerY = h / 2f
+        return swipe(w * 0.2f, centerY, w * 0.8f, centerY)
     }
 }
+

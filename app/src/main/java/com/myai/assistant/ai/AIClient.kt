@@ -8,6 +8,7 @@ import android.util.Log
 import com.myai.assistant.ai.models.*
 import com.myai.assistant.data.model.ChatMessage
 import com.myai.assistant.data.model.MessageSender
+import com.myai.assistant.data.repository.SettingsRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,28 +22,55 @@ import javax.inject.Singleton
  */
 @Singleton
 class AIClient @Inject constructor(
+    private val localInferenceClient: LocalInferenceClient,
     private val ollamaClient: OllamaClient,
-    private val geminiClient: GeminiClient
+    private val geminiClient: GeminiClient,
+    private val settingsRepository: SettingsRepository
 ) {
     companion object {
         private const val TAG = "AIClient"
     }
 
+    init {
+        // Initialize client configurations from saved settings
+        ollamaClient.baseUrl = settingsRepository.ollamaUrl
+        ollamaClient.model = settingsRepository.ollamaModel
+        geminiClient.updateApiKey(settingsRepository.geminiApiKey)
+    }
+
     // ═══════════════════════════════════════
     // CONFIG — Runtime pe change ho sakta hai
     // ═══════════════════════════════════════
-    var useLocalOllama: Boolean = true       // Primary: Ollama
-    var useGeminiFallback: Boolean = true    // Fallback: Gemini
+    var useLocalOllama: Boolean
+        get() = settingsRepository.useOllama
+        set(value) { settingsRepository.useOllama = value }
+
+    var useGeminiFallback: Boolean
+        get() = settingsRepository.useGemini
+        set(value) { settingsRepository.useGemini = value }
+
+    var useLiteRt: Boolean
+        get() = settingsRepository.useLiteRt
+        set(value) { settingsRepository.useLiteRt = value }
 
     // Track which service is actually working
     private var ollamaFailed = false
 
     // Ollama config
-    fun setOllamaUrl(url: String) { ollamaClient.baseUrl = url }
-    fun setOllamaModel(model: String) { ollamaClient.model = model }
+    fun setOllamaUrl(url: String) {
+        settingsRepository.ollamaUrl = url
+        ollamaClient.baseUrl = url
+    }
+    fun setOllamaModel(model: String) {
+        settingsRepository.ollamaModel = model
+        ollamaClient.model = model
+    }
 
     // Gemini config
-    fun setGeminiApiKey(key: String) { geminiClient.updateApiKey(key) }
+    fun setGeminiApiKey(key: String) {
+        settingsRepository.geminiApiKey = key
+        geminiClient.updateApiKey(key)
+    }
 
     /**
      * AI se baat karo — Main function
@@ -65,11 +93,73 @@ class AIClient @Inject constructor(
                 Pair(role, msg.content)
             }
 
-        // Strategy 1: Ollama (local) — skip if previously failed (retry every 5th call)
+        // Get active screen context from accessibility service if available
+        val activeService = com.myai.assistant.accessibility.MyAccessibilityService.instance
+        val screenContext = if (activeService != null) {
+            try {
+                val elements = activeService.getScreenSnapshot()
+                val activeApp = com.myai.assistant.accessibility.MyAccessibilityService.currentApp.value
+                val elementsList = elements
+                    .filter { it.isClickable || it.isEditable || it.text.isNotBlank() || it.contentDescription.isNotBlank() }
+                    .take(30)
+                    .joinToString("\n") { element ->
+                        val type = element.className.substringAfterLast(".")
+                        val clickableMarker = if (element.isClickable) "[Clickable]" else ""
+                        val editableMarker = if (element.isEditable) "[Editable]" else ""
+                        val textInfo = if (element.text.isNotBlank()) "text='${element.text}'" else ""
+                        val descInfo = if (element.contentDescription.isNotBlank()) "desc='${element.contentDescription}'" else ""
+                        "- $type: $textInfo $descInfo $clickableMarker $editableMarker".trim()
+                    }
+                "Current Active App: $activeApp\nVisible UI Elements:\n$elementsList"
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to capture screen snapshot: ${e.message}")
+                ""
+            }
+        } else ""
+
+        // Get recent notifications context
+        val notifContext = try {
+            val notifs = com.myai.assistant.service.MyNotificationListener.notifications.value
+            if (notifs.isNotEmpty()) {
+                val notifList = notifs.take(3).joinToString("\n") { n ->
+                    "- [${n.appName}] ${n.title}: ${n.text}"
+                }
+                "Recent Notifications:\n$notifList"
+            } else ""
+        } catch (e: Exception) { "" }
+
+        val enrichedMessage = buildString {
+            append("User Request: $userMessage")
+            if (screenContext.isNotBlank()) {
+                append("\n\n[SCREEN LAYOUT CONTEXT]\n$screenContext")
+            }
+            if (notifContext.isNotBlank()) {
+                append("\n\n[NOTIFICATIONS]\n$notifContext")
+            }
+            if (screenContext.isNotBlank() || notifContext.isNotBlank()) {
+                append("\n\nUse this context to make smart decisions.")
+            }
+        }
+
+        // Strategy 1: LiteRT (On-Device local inference)
+        if (useLiteRt) {
+            Log.d(TAG, "🧠 Trying On-Device LiteRT...")
+            try {
+                val response = localInferenceClient.chat(enrichedMessage)
+                if (response.isSuccess && response.action != "ERROR") {
+                    Log.d(TAG, "✅ LiteRT success: ${response.action}")
+                    return response
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "❌ LiteRT failed: ${e.message}")
+            }
+        }
+
+        // Strategy 2: Ollama (local network) — skip if previously failed (retry every 5th call)
         if (useLocalOllama && !ollamaFailed) {
             Log.d(TAG, "🧠 Trying Ollama...")
             try {
-                val ollamaResponse = ollamaClient.chat(userMessage, historyPairs)
+                val ollamaResponse = ollamaClient.chat(enrichedMessage, historyPairs)
 
                 if (ollamaResponse.isSuccess) {
                     Log.d(TAG, "✅ Ollama success: ${ollamaResponse.action}")
@@ -83,11 +173,11 @@ class AIClient @Inject constructor(
             }
         }
 
-        // Strategy 2: Gemini (cloud)
+        // Strategy 3: Gemini (cloud)
         if (useGeminiFallback && geminiClient.isAvailable()) {
             Log.d(TAG, "🧠 Trying Gemini...")
             try {
-                val geminiResponse = geminiClient.chat(userMessage, historyPairs)
+                val geminiResponse = geminiClient.chat(enrichedMessage, historyPairs)
 
                 if (geminiResponse.isSuccess) {
                     Log.d(TAG, "✅ Gemini success: ${geminiResponse.action}")
@@ -111,6 +201,44 @@ class AIClient @Inject constructor(
         // Strategy 3: Offline fallback
         Log.w(TAG, "⚠️ Both AI services failed, using offline fallback")
         return offlineFallback(userMessage)
+    }
+
+    /**
+     * Agent Loop ke liye — pre-built prompt directly send karo
+     * No screen/notification enrichment (agent builds its own context)
+     */
+    suspend fun sendAgentMessage(agentPrompt: String): AiParsedResponse {
+        // Try LiteRT first
+        if (useLiteRt) {
+            try {
+                val response = localInferenceClient.chat(agentPrompt)
+                if (response.isSuccess && response.action != "ERROR") return response
+            } catch (_: Exception) {}
+        }
+
+        // Try Ollama next
+        if (useLocalOllama && !ollamaFailed) {
+            try {
+                val response = ollamaClient.chat(agentPrompt, emptyList())
+                if (response.isSuccess) return response
+                ollamaFailed = true
+            } catch (e: Exception) {
+                ollamaFailed = true
+            }
+        }
+
+        // Try Gemini
+        if (useGeminiFallback && geminiClient.isAvailable()) {
+            try {
+                val response = geminiClient.chat(agentPrompt, emptyList())
+                if (response.isSuccess) return response
+                return response
+            } catch (e: Exception) {
+                return AiResponseParser.errorResponse("Gemini error: ${e.message}", AiSource.GEMINI)
+            }
+        }
+
+        return offlineFallback(agentPrompt)
     }
 
     /**

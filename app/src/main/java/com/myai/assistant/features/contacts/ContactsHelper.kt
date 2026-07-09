@@ -68,16 +68,23 @@ class ContactsHelper @Inject constructor() {
     }
 
     /**
-     * Direct call karo
+     * Direct call karo, fallback to dialer if permission is missing
      */
     fun makeCall(context: Context, phoneNumber: String): Boolean {
         return try {
-            val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phoneNumber")).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE)
+                == PackageManager.PERMISSION_GRANTED) {
+                val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$phoneNumber")).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+                Log.d(TAG, "📞 Direct Calling: $phoneNumber")
+                true
+            } else {
+                Log.w(TAG, "Permission CALL_PHONE not granted, opening dialer fallback")
+                openDialer(context, phoneNumber)
+                true
             }
-            context.startActivity(intent)
-            Log.d(TAG, "📞 Calling: $phoneNumber")
-            true
         } catch (e: Exception) {
             Log.e(TAG, "Call failed: ${e.message}")
             false
