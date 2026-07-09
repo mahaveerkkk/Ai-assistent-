@@ -5,8 +5,11 @@ package com.myai.assistant.ai
 
 import android.content.Context
 import android.util.Log
+import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.Contents
 import com.myai.assistant.ai.models.AiParsedResponse
 import com.myai.assistant.ai.models.AiResponseParser
 import com.myai.assistant.ai.models.AiSource
@@ -92,8 +95,12 @@ class LocalInferenceClient @Inject constructor(
             val responseBuilder = StringBuilder()
             
             // Collect the response stream from LiteRT-LM Async Flow
-            conversation.sendMessageAsync(prompt).collect { partialResponse: String ->
-                responseBuilder.append(partialResponse)
+            val request = Message.user(Contents.of(prompt))
+            conversation.sendMessageAsync(request).collect { partialResponse ->
+                val partialText = partialResponse.contents.contents
+                    .filterIsInstance<Content.Text>()
+                    .joinToString(separator = "") { it.text }
+                responseBuilder.append(partialText)
             }
             
             val fullResponse = responseBuilder.toString().trim()
