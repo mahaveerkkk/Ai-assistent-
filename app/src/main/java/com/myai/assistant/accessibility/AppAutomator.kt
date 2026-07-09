@@ -267,8 +267,9 @@ class AppAutomator(
             delay(2000)
 
             // Search icon click
-            actionPerformer.clickByContentDescription("Search")
-                    ?: actionPerformer.clickByText("Search")
+            if (!actionPerformer.clickByContentDescription("Search")) {
+                actionPerformer.clickByText("Search")
+            }
             delay(1000)
 
             // Contact name type karo
@@ -284,9 +285,7 @@ class AppAutomator(
             delay(500)
 
             // Send button click
-            return actionPerformer.clickByContentDescription("Send")
-                    ?: actionPerformer.clickByText("Send")
-                    ?: false
+            return actionPerformer.clickByContentDescription("Send") || actionPerformer.clickByText("Send")
 
         } catch (e: Exception) {
             Log.e(TAG, "Telegram error: ${e.message}", e)
@@ -310,13 +309,15 @@ class AppAutomator(
             delay(2500)
 
             // DM icon click (paper plane icon)
-            actionPerformer.clickByContentDescription("Direct")
-                    ?: actionPerformer.clickByContentDescription("Messenger")
+            if (!actionPerformer.clickByContentDescription("Direct")) {
+                actionPerformer.clickByContentDescription("Messenger")
+            }
             delay(1500)
 
             // Search mein contact dhundo
-            actionPerformer.clickByText("Search")
-                    ?: actionPerformer.clickByContentDescription("Search")
+            if (!actionPerformer.clickByText("Search")) {
+                actionPerformer.clickByContentDescription("Search")
+            }
             delay(1000)
 
             actionPerformer.typeInFirstField(contact)
@@ -331,9 +332,7 @@ class AppAutomator(
             delay(500)
 
             // Send
-            return actionPerformer.clickByContentDescription("Send")
-                    ?: actionPerformer.clickByText("Send")
-                    ?: false
+            return actionPerformer.clickByContentDescription("Send") || actionPerformer.clickByText("Send")
 
         } catch (e: Exception) {
             Log.e(TAG, "Instagram DM error: ${e.message}", e)
