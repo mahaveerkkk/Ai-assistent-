@@ -706,7 +706,9 @@ class AssistantViewModel @Inject constructor(
      */
     fun stopAgent() {
         agentLoop.stop()
-        chatRepository.saveSystemMessage("🛑 Agent stopped")
+        viewModelScope.launch {
+            chatRepository.saveSystemMessage("🛑 Agent stopped")
+        }
     }
 
     /**

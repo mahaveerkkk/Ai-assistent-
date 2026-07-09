@@ -178,6 +178,11 @@ dependencies {
     implementation(libs.coil.compose)
 
     // ═══════════════════════════════════════
+    // GOOGLE LITERT-LM (On-Device AI)
+    // ═══════════════════════════════════════
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+
+    // ═══════════════════════════════════════
     // TESTING
     // ═══════════════════════════════════════
     testImplementation(libs.junit)

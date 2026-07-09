@@ -69,10 +69,12 @@ class LocalInferenceClient @Inject constructor(
      * 💬 Execute chat query locally on-device
      */
     suspend fun chat(prompt: String): AiParsedResponse = withContext(Dispatchers.Default) {
+        val currentEngine = engine
         // Ensure engine is initialized
-        if (!isInitialized || engine == null) {
+        if (!isInitialized || currentEngine == null) {
             val initSuccess = initialize()
-            if (!initSuccess || engine == null) {
+            val freshEngine = engine
+            if (!initSuccess || freshEngine == null) {
                 return@withContext AiResponseParser.errorResponse(
                     "LiteRT-LM not initialized. Please verify model path in Settings.",
                     AiSource.FALLBACK
@@ -82,15 +84,15 @@ class LocalInferenceClient @Inject constructor(
 
         try {
             Log.d(TAG, "🧠 Running Local Inference...")
-            val currentEngine = engine!!
+            val activeEngine = engine ?: return@withContext AiResponseParser.errorResponse("LiteRT Engine lost", AiSource.FALLBACK)
             
             // Create a conversation session
-            val conversation = currentEngine.createConversation()
+            val conversation = activeEngine.createConversation()
             
             val responseBuilder = StringBuilder()
             
             // Collect the response stream from LiteRT-LM Async Flow
-            conversation.sendMessageAsync(prompt).collect { partialResponse ->
+            conversation.sendMessageAsync(prompt).collect { partialResponse: String ->
                 responseBuilder.append(partialResponse)
             }
             
@@ -111,7 +113,8 @@ class LocalInferenceClient @Inject constructor(
      */
     override fun close() {
         try {
-            engine?.close()
+            val current = engine
+            current?.close()
             engine = null
             isInitialized = false
             Log.d(TAG, "🔌 LiteRT-LM Engine closed successfully")
