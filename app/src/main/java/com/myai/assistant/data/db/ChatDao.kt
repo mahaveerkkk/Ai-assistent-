@@ -65,4 +65,10 @@ interface ChatDao {
      */
     @Query("SELECT * FROM chat_messages WHERE content LIKE '%' || :query || '%' ORDER BY timestamp DESC")
     fun searchMessages(query: String): Flow<List<ChatMessage>>
+
+    /**
+     * Delete messages older than the given timestamp
+     */
+    @Query("DELETE FROM chat_messages WHERE timestamp < :timestamp")
+    suspend fun deleteOldMessages(timestamp: Long)
 }

@@ -26,12 +26,16 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.myai.assistant.data.model.MessageSender
 import com.myai.assistant.ui.components.MessageBubble
 import com.myai.assistant.ui.components.TypingIndicator
 import com.myai.assistant.ui.components.VoiceButton
@@ -42,13 +46,54 @@ import com.myai.assistant.viewmodel.AssistantViewModel
 @Composable
 fun ChatScreen(
     viewModel: AssistantViewModel = hiltViewModel(),
-    onNavigateToSettings: () -> Unit = {}
+    onNavigateToSettings: () -> Unit = {},
+    onNavigateToCamera: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val listState = rememberLazyListState()
     val focusManager = LocalFocusManager.current
     var showMenu by remember { mutableStateOf(false) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
+    var showQuickActions by remember { mutableStateOf(false) }
+
+    val haptic = LocalHapticFeedback.current
+    val continuousVoiceMode by viewModel.continuousVoiceMode.collectAsState()
+
+    // Continuous voice mode state tracking
+    var wasSpeaking by remember { mutableStateOf(false) }
+    LaunchedEffect(uiState.isSpeaking) {
+        if (continuousVoiceMode) {
+            val isSpeaking = uiState.isSpeaking
+            if (wasSpeaking && !isSpeaking) {
+                val lastMessage = uiState.messages.lastOrNull()
+                if (lastMessage != null && lastMessage.sender == MessageSender.AI) {
+                    kotlinx.coroutines.delay(500)
+                    if (!uiState.isListening) {
+                        viewModel.toggleListening()
+                    }
+                }
+            }
+            wasSpeaking = isSpeaking
+        }
+    }
+
+    // Listening to cold start and new intents from widget
+    LaunchedEffect(Unit) {
+        if (viewModel.launchVoicePending) {
+            viewModel.launchVoicePending = false
+            if (!uiState.isListening) {
+                viewModel.toggleListening()
+            }
+        }
+    }
+
+    LaunchedEffect(viewModel) {
+        viewModel.voiceIntentTrigger.collect {
+            if (!uiState.isListening) {
+                viewModel.toggleListening()
+            }
+        }
+    }
 
     // Auto-scroll jab naya message aaye
     LaunchedEffect(uiState.messages.size) {
@@ -66,6 +111,8 @@ fun ChatScreen(
             ChatTopBar(
                 isAiThinking = uiState.isAiThinking,
                 isVoiceEnabled = uiState.isVoiceEnabled,
+                isContinuousVoiceEnabled = continuousVoiceMode,
+                onToggleContinuousVoice = { viewModel.setContinuousVoiceMode(!continuousVoiceMode) },
                 aiSource = uiState.aiSource,
                 onToggleVoice = { viewModel.toggleVoiceOutput() },
                 showMenu = showMenu,
@@ -127,11 +174,148 @@ fun ChatScreen(
                 isAiThinking = uiState.isAiThinking,
                 onTextChange = { viewModel.updateInputText(it) },
                 onSend = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                     viewModel.sendMessage()
                     focusManager.clearFocus()
                 },
-                onVoiceClick = { viewModel.toggleListening() }
+                onVoiceClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.toggleListening()
+                },
+                onCameraClick = onNavigateToCamera,
+                onQuickActionsClick = {
+                    showQuickActions = true
+                }
             )
+        }
+    }
+
+    if (showQuickActions) {
+        ModalBottomSheet(
+            onDismissRequest = { showQuickActions = false },
+            sheetState = rememberModalBottomSheetState(),
+            containerColor = MaterialTheme.colorScheme.surface,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 8.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text(
+                    text = "⚡ Quick Actions",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 16.dp)
+                )
+
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        QuickActionCard(
+                            icon = Icons.Filled.FlashlightOn,
+                            title = "Flashlight",
+                            subtitle = if (viewModel.isFlashlightOn) "Turn Off" else "Turn On",
+                            active = viewModel.isFlashlightOn,
+                            onClick = {
+                                val success = viewModel.toggleFlashlight()
+                                if (success) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        QuickActionCard(
+                            icon = Icons.Filled.Wifi,
+                            title = "WiFi Panel",
+                            subtitle = "Open Panel",
+                            active = false,
+                            onClick = {
+                                val success = viewModel.openWifiPanel()
+                                if (success) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showQuickActions = false
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        QuickActionCard(
+                            icon = Icons.Filled.DoNotDisturb,
+                            title = "DND Mode",
+                            subtitle = if (viewModel.isDndOn) "Turn Off" else "Turn On",
+                            active = viewModel.isDndOn,
+                            onClick = {
+                                val success = viewModel.toggleDnd()
+                                if (success) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        QuickActionCard(
+                            icon = Icons.Filled.Bluetooth,
+                            title = "Bluetooth",
+                            subtitle = if (viewModel.isBluetoothOn) "Turn Off" else "Turn On",
+                            active = viewModel.isBluetoothOn,
+                            onClick = {
+                                val success = viewModel.toggleBluetooth()
+                                if (success) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        QuickActionCard(
+                            icon = Icons.Filled.Alarm,
+                            title = "Alarm",
+                            subtitle = "Show Alarms",
+                            active = false,
+                            onClick = {
+                                val success = viewModel.openAlarm()
+                                if (success) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showQuickActions = false
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        QuickActionCard(
+                            icon = Icons.Filled.Screenshot,
+                            title = "Screenshot",
+                            subtitle = "Capture Screen",
+                            active = false,
+                            onClick = {
+                                viewModel.takeScreenshot()
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                showQuickActions = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
         }
     }
 
@@ -319,6 +503,8 @@ fun ChatScreen(
 private fun ChatTopBar(
     isAiThinking: Boolean,
     isVoiceEnabled: Boolean,
+    isContinuousVoiceEnabled: Boolean,
+    onToggleContinuousVoice: () -> Unit,
     aiSource: String,
     onToggleVoice: () -> Unit,
     showMenu: Boolean,
@@ -335,7 +521,12 @@ private fun ChatTopBar(
                     modifier = Modifier
                         .size(36.dp)
                         .background(
-                            brush = Brush.linearGradient(listOf(GradientStart, GradientMiddle)),
+                            brush = Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.secondary
+                                )
+                            ),
                             shape = RoundedCornerShape(12.dp)
                         ),
                     contentAlignment = Alignment.Center
@@ -366,7 +557,7 @@ private fun ChatTopBar(
                         color = when {
                             isAiThinking -> WarningColor
                             aiSource == "ollama" -> SuccessColor
-                            aiSource == "gemini" -> PrimaryDark
+                            aiSource == "gemini" -> MaterialTheme.colorScheme.primary
                             else -> MaterialTheme.colorScheme.onSurfaceVariant
                         },
                         fontSize = 11.sp
@@ -380,7 +571,15 @@ private fun ChatTopBar(
                 Icon(
                     imageVector = if (isVoiceEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
                     contentDescription = "Voice",
-                    tint = if (isVoiceEnabled) PrimaryDark else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isVoiceEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            // Continuous voice mode toggle
+            IconButton(onClick = onToggleContinuousVoice) {
+                Icon(
+                    imageVector = Icons.Filled.Hearing,
+                    contentDescription = "Continuous Voice Mode",
+                    tint = if (isContinuousVoiceEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                 )
             }
             // Menu
@@ -423,7 +622,9 @@ private fun ChatInputBar(
     isAiThinking: Boolean,
     onTextChange: (String) -> Unit,
     onSend: () -> Unit,
-    onVoiceClick: () -> Unit
+    onVoiceClick: () -> Unit,
+    onCameraClick: () -> Unit,
+    onQuickActionsClick: () -> Unit
 ) {
     Surface(
         color = MaterialTheme.colorScheme.surface,
@@ -436,6 +637,27 @@ private fun ChatInputBar(
                 .navigationBarsPadding(),
             verticalAlignment = Alignment.Bottom
         ) {
+            // Quick Actions Button
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(onClick = onQuickActionsClick) {
+                    Icon(
+                        Icons.Filled.Widgets,
+                        contentDescription = "Quick Actions",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(8.dp))
+
             // Text Field
             OutlinedTextField(
                 value = inputText,
@@ -451,7 +673,7 @@ private fun ChatInputBar(
                 },
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = PrimaryDark,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
                     unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
                     unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
@@ -460,6 +682,27 @@ private fun ChatInputBar(
                 keyboardActions = KeyboardActions(onSend = { if (inputText.isNotBlank()) onSend() }),
                 maxLines = 4
             )
+
+            Spacer(Modifier.width(8.dp))
+
+            // Camera Button next to the send/voice button
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(CircleShape)
+                    .background(
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                IconButton(onClick = onCameraClick) {
+                    Icon(
+                        Icons.Filled.PhotoCamera,
+                        contentDescription = "Camera",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
 
             Spacer(Modifier.width(8.dp))
 
@@ -475,10 +718,15 @@ private fun ChatInputBar(
                 // Send button
                 Box(
                     modifier = Modifier
-                        .size(52.dp)
+                        .size(48.dp)
                         .clip(CircleShape)
                         .background(
-                            brush = Brush.linearGradient(listOf(GradientStart, GradientMiddle))
+                            brush = Brush.linearGradient(
+                                listOf(
+                                    MaterialTheme.colorScheme.primary,
+                                    MaterialTheme.colorScheme.secondary
+                                )
+                            )
                         ),
                     contentAlignment = Alignment.Center
                 ) {
@@ -489,10 +737,75 @@ private fun ChatInputBar(
                         Icon(
                             Icons.AutoMirrored.Filled.Send, "Send",
                             tint = Color.White,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuickActionCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    active: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onClick,
+        modifier = modifier.height(72.dp),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer 
+                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .background(
+                        color = if (active) MaterialTheme.colorScheme.primary 
+                                 else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = if (active) MaterialTheme.colorScheme.onPrimary 
+                           else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer 
+                           else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) 
+                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
+                )
             }
         }
     }

@@ -7,16 +7,43 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import com.myai.assistant.service.BackupWorker
 import dagger.hilt.android.HiltAndroidApp
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
 
 @HiltAndroidApp
-class MyAIApp : Application() {
+class MyAIApp : Application(), Configuration.Provider {
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
+    override fun getWorkManagerConfiguration() = Configuration.Builder()
+        .setWorkerFactory(workerFactory)
+        .build()
 
     override fun onCreate() {
         super.onCreate()
 
         // Notification channels create karo (Android 8.0+ ke liye zaroori)
         createNotificationChannels()
+
+        // Schedule periodic backup/cleanup work
+        scheduleBackupWork()
+    }
+
+    private fun scheduleBackupWork() {
+        val request = PeriodicWorkRequestBuilder<BackupWorker>(24, TimeUnit.HOURS).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "BackupWork",
+            ExistingPeriodicWorkPolicy.KEEP,
+            request
+        )
     }
 
     /**

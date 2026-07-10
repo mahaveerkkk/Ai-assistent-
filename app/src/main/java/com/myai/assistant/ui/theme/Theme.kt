@@ -105,22 +105,44 @@ private val LightColorScheme = lightColorScheme(
 // ═══════════════════════════════════════
 @Composable
 fun MyAIAssistantTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Dynamic colors Android 12+ pe available hain
-    dynamicColor: Boolean = false,  // Default off — humara custom theme use karo
+    chatTheme: String = "Modern Blue",
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        // Dynamic color use karna ho toh (Android 12+)
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context)
-            else dynamicLightColorScheme(context)
-        }
-        // Humara custom dark theme
-        darkTheme -> DarkColorScheme
-        // Humara custom light theme
-        else -> LightColorScheme
+    val colorScheme = when (chatTheme) {
+        "Cyberpunk Purple" -> darkColorScheme(
+            primary = Color(0xFFEC4899),      // Pink
+            onPrimary = Color.White,
+            secondary = Color(0xFFA855F7),    // Purple
+            tertiary = Color(0xFF06B6D4),     // Cyan
+            background = Color(0xFF090514),   // Deep purple-black
+            surface = Color(0xFF130E26),
+            surfaceVariant = Color(0xFF1E1736),
+            onBackground = Color(0xFFF3E8FF),
+            onSurface = Color(0xFFF3E8FF)
+        )
+        "Minimalist Dark" -> darkColorScheme(
+            primary = Color(0xFFF1F5F9),      // Off-white
+            onPrimary = Color(0xFF0F172A),
+            secondary = Color(0xFF94A3B8),    // Muted grey
+            tertiary = Color(0xFF475569),     // Slate
+            background = Color(0xFF09090B),   // Zinc black
+            surface = Color(0xFF18181B),
+            surfaceVariant = Color(0xFF27272A),
+            onBackground = Color(0xFFF4F4F5),
+            onSurface = Color(0xFFF4F4F5)
+        )
+        "Forest Green" -> darkColorScheme(
+            primary = Color(0xFF10B981),      // Emerald green
+            onPrimary = Color.White,
+            secondary = Color(0xFF34D399),    // Mint
+            tertiary = Color(0xFF064E3B),     // Dark forest
+            background = Color(0xFF050F0A),   // Forest black
+            surface = Color(0xFF0A1C14),
+            surfaceVariant = Color(0xFF102A1E),
+            onBackground = Color(0xFFECFDF5),
+            onSurface = Color(0xFFECFDF5)
+        )
+        else -> DarkColorScheme // Modern Blue
     }
 
     // Status bar aur navigation bar colors set karo
@@ -128,12 +150,11 @@ fun MyAIAssistantTheme(
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as Activity).window
-            // Status bar transparent with dark icons on light, light icons on dark
             window.statusBarColor = Color.Transparent.toArgb()
             window.navigationBarColor = Color.Transparent.toArgb()
             WindowCompat.getInsetsController(window, view).apply {
-                isAppearanceLightStatusBars = !darkTheme
-                isAppearanceLightNavigationBars = !darkTheme
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
             }
         }
     }

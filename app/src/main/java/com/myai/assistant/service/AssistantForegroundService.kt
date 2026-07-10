@@ -18,6 +18,8 @@ import com.myai.assistant.features.voice.WakeWordDetector
 import com.myai.assistant.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 /**
  * Assistant Foreground Service
@@ -46,6 +48,9 @@ class AssistantForegroundService : Service() {
     @Inject lateinit var voiceManager: VoiceManager
     @Inject lateinit var geminiTts: GeminiTTSManager
     @Inject lateinit var wakeWordDetector: WakeWordDetector
+    @Inject lateinit var assistantBrain: com.myai.assistant.ai.AssistantBrain
+
+    private val serviceScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main + kotlinx.coroutines.Job())
 
     override fun onCreate() {
         super.onCreate()
@@ -77,8 +82,9 @@ class AssistantForegroundService : Service() {
             // Full listening start karo
             voiceManager.onResult = { transcript ->
                 Log.d(TAG, "🎤 Voice input: $transcript")
-                // TODO: AI brain ko bhejo via broadcast/event
-                // Yeh hoga jab ViewModel background mein bhi accessible ho
+                serviceScope.launch {
+                    assistantBrain.processRequest(transcript, isVoiceOutputEnabled = true)
+                }
 
                 // Wakeword resume karo
                 wakeWordDetector.resume()
@@ -109,6 +115,7 @@ class AssistantForegroundService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceScope.cancel()
         wakeWordDetector.destroy()
         voiceManager.destroy()
         geminiTts.destroy()

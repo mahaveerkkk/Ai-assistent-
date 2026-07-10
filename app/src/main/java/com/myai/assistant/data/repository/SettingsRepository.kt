@@ -1,18 +1,23 @@
 // File: app/src/main/java/com/myai/assistant/data/repository/SettingsRepository.kt
-// Settings Repository — Persist settings via SharedPreferences
+// Settings Repository — Persist settings via DataStore Preferences
 
 package com.myai.assistant.data.repository
 
-import android.content.Context
-import android.content.SharedPreferences
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
 import com.myai.assistant.BuildConfig
-import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class SettingsRepository @Inject constructor(
-    @ApplicationContext private val context: Context
+    private val dataStore: DataStore<Preferences>
 ) {
     companion object {
         private const val PREFS_NAME = "myai_settings_prefs"
@@ -28,66 +33,182 @@ class SettingsRepository @Inject constructor(
         const val KEY_FLOATING_BUBBLE = "floating_bubble"
         const val KEY_AUTO_START_BOOT = "auto_start_boot"
         const val KEY_BACKGROUND_SERVICE = "background_service"
+        const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
+        const val KEY_CHAT_THEME = "chat_theme"
+        const val KEY_CONTINUOUS_VOICE = "continuous_voice"
 
         private const val DEFAULT_OLLAMA_URL = "http://10.0.2.2:11434"
         private const val DEFAULT_OLLAMA_MODEL = "llama3"
         private const val DEFAULT_LITERT_PATH = "/sdcard/Download/gemma.litertlm"
+        private const val DEFAULT_CHAT_THEME = "Modern Blue"
+
+        private val PREF_KEY_OLLAMA_URL = stringPreferencesKey(KEY_OLLAMA_URL)
+        private val PREF_KEY_OLLAMA_MODEL = stringPreferencesKey(KEY_OLLAMA_MODEL)
+        private val PREF_KEY_GEMINI_API_KEY = stringPreferencesKey(KEY_GEMINI_API_KEY)
+        private val PREF_KEY_USE_OLLAMA = booleanPreferencesKey(KEY_USE_OLLAMA)
+        private val PREF_KEY_USE_GEMINI = booleanPreferencesKey(KEY_USE_GEMINI)
+        private val PREF_KEY_USE_LITERT = booleanPreferencesKey(KEY_USE_LITERT)
+        private val PREF_KEY_LITERT_MODEL_PATH = stringPreferencesKey(KEY_LITERT_MODEL_PATH)
+        private val PREF_KEY_VOICE_ENABLED = booleanPreferencesKey(KEY_VOICE_ENABLED)
+        private val PREF_KEY_FLOATING_BUBBLE = booleanPreferencesKey(KEY_FLOATING_BUBBLE)
+        private val PREF_KEY_AUTO_START_BOOT = booleanPreferencesKey(KEY_AUTO_START_BOOT)
+        private val PREF_KEY_BACKGROUND_SERVICE = booleanPreferencesKey(KEY_BACKGROUND_SERVICE)
+        private val PREF_KEY_ONBOARDING_COMPLETED = booleanPreferencesKey(KEY_ONBOARDING_COMPLETED)
+        private val PREF_KEY_CHAT_THEME = stringPreferencesKey(KEY_CHAT_THEME)
+        private val PREF_KEY_CONTINUOUS_VOICE = booleanPreferencesKey(KEY_CONTINUOUS_VOICE)
     }
 
-    private val prefs: SharedPreferences = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    // Onboarding Completed
+    var onboardingCompleted: Boolean
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_ONBOARDING_COMPLETED] ?: false }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_ONBOARDING_COMPLETED] = value }
+            }
+        }
+
+    // Chat Theme
+    var chatTheme: String
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_CHAT_THEME] ?: DEFAULT_CHAT_THEME }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_CHAT_THEME] = value }
+            }
+        }
 
     // Ollama URL
     var ollamaUrl: String
-        get() = prefs.getString(KEY_OLLAMA_URL, DEFAULT_OLLAMA_URL) ?: DEFAULT_OLLAMA_URL
-        set(value) = prefs.edit().putString(KEY_OLLAMA_URL, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_OLLAMA_URL] ?: DEFAULT_OLLAMA_URL }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_OLLAMA_URL] = value }
+            }
+        }
 
     // Ollama Model
     var ollamaModel: String
-        get() = prefs.getString(KEY_OLLAMA_MODEL, DEFAULT_OLLAMA_MODEL) ?: DEFAULT_OLLAMA_MODEL
-        set(value) = prefs.edit().putString(KEY_OLLAMA_MODEL, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_OLLAMA_MODEL] ?: DEFAULT_OLLAMA_MODEL }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_OLLAMA_MODEL] = value }
+            }
+        }
 
     // Gemini API Key
     var geminiApiKey: String
-        get() = prefs.getString(KEY_GEMINI_API_KEY, BuildConfig.GEMINI_API_KEY) ?: BuildConfig.GEMINI_API_KEY
-        set(value) = prefs.edit().putString(KEY_GEMINI_API_KEY, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_GEMINI_API_KEY] ?: BuildConfig.GEMINI_API_KEY }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_GEMINI_API_KEY] = value }
+            }
+        }
 
     // Use Ollama (Local)
     var useOllama: Boolean
-        get() = prefs.getBoolean(KEY_USE_OLLAMA, true)
-        set(value) = prefs.edit().putBoolean(KEY_USE_OLLAMA, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_USE_OLLAMA] ?: true }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_USE_OLLAMA] = value }
+            }
+        }
 
     // Use Gemini (Cloud)
     var useGemini: Boolean
-        get() = prefs.getBoolean(KEY_USE_GEMINI, true)
-        set(value) = prefs.edit().putBoolean(KEY_USE_GEMINI, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_USE_GEMINI] ?: true }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_USE_GEMINI] = value }
+            }
+        }
 
     // Voice Enabled
     var voiceEnabled: Boolean
-        get() = prefs.getBoolean(KEY_VOICE_ENABLED, true)
-        set(value) = prefs.edit().putBoolean(KEY_VOICE_ENABLED, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_VOICE_ENABLED] ?: true }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_VOICE_ENABLED] = value }
+            }
+        }
 
     // Floating Bubble Overlay
     var floatingBubble: Boolean
-        get() = prefs.getBoolean(KEY_FLOATING_BUBBLE, false)
-        set(value) = prefs.edit().putBoolean(KEY_FLOATING_BUBBLE, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_FLOATING_BUBBLE] ?: false }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_FLOATING_BUBBLE] = value }
+            }
+        }
 
     // Auto Start on Boot
     var autoStartBoot: Boolean
-        get() = prefs.getBoolean(KEY_AUTO_START_BOOT, true)
-        set(value) = prefs.edit().putBoolean(KEY_AUTO_START_BOOT, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_AUTO_START_BOOT] ?: true }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_AUTO_START_BOOT] = value }
+            }
+        }
 
     // Background Active Service
     var backgroundService: Boolean
-        get() = prefs.getBoolean(KEY_BACKGROUND_SERVICE, false)
-        set(value) = prefs.edit().putBoolean(KEY_BACKGROUND_SERVICE, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_BACKGROUND_SERVICE] ?: false }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_BACKGROUND_SERVICE] = value }
+            }
+        }
 
     // Use LiteRT (On-Device Local LLM)
     var useLiteRt: Boolean
-        get() = prefs.getBoolean(KEY_USE_LITERT, false) // Default false, user turns on in settings
-        set(value) = prefs.edit().putBoolean(KEY_USE_LITERT, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_USE_LITERT] ?: false }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_USE_LITERT] = value }
+            }
+        }
 
     // LiteRT model file path on SD Card / Download folder
     var liteRtModelPath: String
-        get() = prefs.getString(KEY_LITERT_MODEL_PATH, DEFAULT_LITERT_PATH) ?: DEFAULT_LITERT_PATH
-        set(value) = prefs.edit().putString(KEY_LITERT_MODEL_PATH, value).apply()
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_LITERT_MODEL_PATH] ?: DEFAULT_LITERT_PATH }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_LITERT_MODEL_PATH] = value }
+            }
+        }
+
+    // Continuous Voice Mode
+    var continuousVoiceMode: Boolean
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_CONTINUOUS_VOICE] ?: false }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_CONTINUOUS_VOICE] = value }
+            }
+        }
 }

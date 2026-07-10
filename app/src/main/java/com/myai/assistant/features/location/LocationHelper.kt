@@ -29,49 +29,69 @@ class LocationHelper @Inject constructor() {
 
     companion object {
         private const val TAG = "LocationHelper"
+
+        @Volatile
+        var lastCachedLocation: LocationInfo? = null
     }
 
     /**
      * Current location lo (one-shot)
      */
-    suspend fun getCurrentLocation(context: Context): LocationInfo? = suspendCancellableCoroutine { cont ->
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-            != PackageManager.PERMISSION_GRANTED) {
-            cont.resume(null)
-            return@suspendCancellableCoroutine
+    suspend fun getCurrentLocation(context: Context): LocationInfo? {
+        val cached = lastCachedLocation
+        if (cached != null) {
+            Log.d(TAG, "⚡ Returning cached location instantly: ${cached.latitude}, ${cached.longitude}")
+            return cached
         }
 
-        val client = LocationServices.getFusedLocationProviderClient(context)
+        return suspendCancellableCoroutine { cont ->
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
+                != PackageManager.PERMISSION_GRANTED) {
+                cont.resume(null)
+                return@suspendCancellableCoroutine
+            }
 
-        // Last known location try karo (fast)
-        client.lastLocation.addOnSuccessListener { location ->
-            if (location != null) {
-                val info = locationToInfo(context, location.latitude, location.longitude)
-                Log.d(TAG, "📍 Location: ${info.latitude}, ${info.longitude} - ${info.address}")
-                cont.resume(info)
-            } else {
-                // Fresh location request karo
-                val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-                    .setMaxUpdates(1)
-                    .build()
+            val client = LocationServices.getFusedLocationProviderClient(context)
 
-                val callback = object : LocationCallback() {
-                    override fun onLocationResult(result: LocationResult) {
-                        client.removeLocationUpdates(this)
-                        val loc = result.lastLocation
-                        if (loc != null) {
-                            cont.resume(locationToInfo(context, loc.latitude, loc.longitude))
-                        } else {
-                            cont.resume(null)
+            // Last known location try karo (fast)
+            client.lastLocation.addOnSuccessListener { location ->
+                if (location != null) {
+                    val info = locationToInfo(context, location.latitude, location.longitude)
+                    lastCachedLocation = info
+                    Log.d(TAG, "📍 Location: ${info.latitude}, ${info.longitude} - ${info.address}")
+                    cont.resume(info)
+                } else {
+                    // Fresh location request karo
+                    val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
+                        .setMaxUpdates(1)
+                        .build()
+
+                    val callback = object : LocationCallback() {
+                        override fun onLocationResult(result: LocationResult) {
+                            client.removeLocationUpdates(this)
+                            val loc = result.lastLocation
+                            if (loc != null) {
+                                val info = locationToInfo(context, loc.latitude, loc.longitude)
+                                lastCachedLocation = info
+                                cont.resume(info)
+                            } else {
+                                cont.resume(null)
+                            }
                         }
                     }
+                    client.requestLocationUpdates(request, callback, context.mainLooper)
                 }
-                client.requestLocationUpdates(request, callback, context.mainLooper)
+            }.addOnFailureListener {
+                Log.e(TAG, "Location failed: ${it.message}")
+                cont.resume(null)
             }
-        }.addOnFailureListener {
-            Log.e(TAG, "Location failed: ${it.message}")
-            cont.resume(null)
         }
+    }
+
+    fun updateCachedLocation(context: Context, latitude: Double, longitude: Double): LocationInfo {
+        val info = locationToInfo(context, latitude, longitude)
+        lastCachedLocation = info
+        return info
     }
 
     private fun locationToInfo(context: Context, lat: Double, lng: Double): LocationInfo {

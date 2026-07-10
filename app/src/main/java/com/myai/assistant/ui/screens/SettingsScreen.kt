@@ -50,6 +50,8 @@ fun SettingsScreen(
     var floatingBubble by remember { mutableStateOf(settings.floatingBubble) }
     var autoStartBoot by remember { mutableStateOf(settings.autoStartBoot) }
     var backgroundService by remember { mutableStateOf(settings.backgroundService) }
+    var chatTheme by remember { mutableStateOf(settings.chatTheme) }
+    var continuousVoiceMode by remember { mutableStateOf(settings.continuousVoiceMode) }
 
     Scaffold(
         topBar = {
@@ -175,6 +177,63 @@ fun SettingsScreen(
                         viewModel.toggleVoiceOutput()
                     }
                 )
+                SettingsToggle(
+                    icon = Icons.Filled.RecordVoiceOver,
+                    title = "Continuous Voice Mode",
+                    subtitle = "Automatically listen after AI finishes speaking",
+                    checked = continuousVoiceMode,
+                    onToggle = {
+                        continuousVoiceMode = it
+                        viewModel.setContinuousVoiceMode(it)
+                    }
+                )
+            }
+
+            // ═══════════════════════════════════════
+            // APPEARANCE SECTION
+            // ═══════════════════════════════════════
+            SettingsSection(title = "🎨 Appearance") {
+                var showThemeDropdown by remember { mutableStateOf(false) }
+                val themes = listOf("Modern Blue", "Cyberpunk Purple", "Minimalist Dark", "Forest Green")
+                
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Palette, "Theme",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Chat Theme", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                        Text(chatTheme, style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
+                    Box {
+                        TextButton(onClick = { showThemeDropdown = true }) {
+                            Text("Change")
+                        }
+                        DropdownMenu(
+                            expanded = showThemeDropdown,
+                            onDismissRequest = { showThemeDropdown = false }
+                        ) {
+                            themes.forEach { theme ->
+                                DropdownMenuItem(
+                                    text = { Text(theme) },
+                                    onClick = {
+                                        chatTheme = theme
+                                        viewModel.setChatTheme(theme)
+                                        showThemeDropdown = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // ═══════════════════════════════════════

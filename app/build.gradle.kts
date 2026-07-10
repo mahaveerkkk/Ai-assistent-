@@ -38,11 +38,11 @@ android {
             "GEMINI_API_KEY",
             "\"${localProperties.getProperty("GEMINI_API_KEY", "")}\""
         )
+    }
 
-        // Room schema export location
-        ksp {
-            arg("room.schemaLocation", "$projectDir/schemas")
-        }
+    // Room schema export location
+    ksp {
+        arg("room.schemaLocation", "$projectDir/schemas")
     }
 
     buildTypes {
