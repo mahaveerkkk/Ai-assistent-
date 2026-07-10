@@ -68,6 +68,7 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf("-Xskip-metadata-version-check")
     }
 
     buildFeatures {
@@ -180,7 +181,7 @@ dependencies {
     // ═══════════════════════════════════════
     // GOOGLE LITERT-LM (On-Device AI)
     // ═══════════════════════════════════════
-    implementation("com.google.ai.edge.litertlm:litertlm-android:0.13.1")
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.8.0")
 
     // ═══════════════════════════════════════
     // TESTING
