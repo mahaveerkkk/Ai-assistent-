@@ -77,9 +77,21 @@ class AssistantForegroundService : Service() {
             Log.d(TAG, "🎯 Wakeword detected: $detectedWord")
 
             // Notification update karo
-            updateNotification("🎤 Sun raha hoon...")
+            updateNotification("🎤 Friday: Sun raha hoon...")
 
-            // Full listening start karo
+            // Launch MainActivity to bring the UI to the foreground automatically
+            try {
+                val launchIntent = Intent(this, MainActivity::class.java).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    putExtra("launch_voice", true)
+                }
+                startActivity(launchIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to launch MainActivity on wake word: ${e.message}")
+            }
+
+            // Setup results handler
             voiceManager.onResult = { transcript ->
                 Log.d(TAG, "🎤 Voice input: $transcript")
                 serviceScope.launch {
@@ -88,16 +100,21 @@ class AssistantForegroundService : Service() {
 
                 // Wakeword resume karo
                 wakeWordDetector.resume()
-                updateNotification("🤖 AI Assistant Active — \"Suno\" bolo")
+                updateNotification("🤖 Friday Active — Say \"Hey Friday\"")
             }
 
             voiceManager.onError = { error ->
                 Log.w(TAG, "Voice error in service: $error")
                 wakeWordDetector.resume()
-                updateNotification("🤖 AI Assistant Active — \"Suno\" bolo")
+                updateNotification("🤖 Friday Active — Say \"Hey Friday\"")
             }
 
-            voiceManager.startListening()
+            serviceScope.launch {
+                // Speak holographic response
+                geminiTts.speak("Yes boss, listening")
+                kotlinx.coroutines.delay(1200) // Delay to let TTS finish speaking
+                voiceManager.startListening()
+            }
         }
 
         wakeWordDetector.onError = { error ->

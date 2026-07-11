@@ -1,9 +1,11 @@
 // File: app/src/main/java/com/myai/assistant/ui/screens/ChatScreen.kt
-// Chat Screen — Main AI chat interface
+// Chat Screen — Main AI chat interface with FridayOrb integration
 
 package com.myai.assistant.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -24,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.myai.assistant.data.model.MessageSender
+import com.myai.assistant.ui.components.FridayOrb
 import com.myai.assistant.ui.components.MessageBubble
 import com.myai.assistant.ui.components.TypingIndicator
 import com.myai.assistant.ui.components.VoiceButton
@@ -55,9 +59,15 @@ fun ChatScreen(
     var showMenu by remember { mutableStateOf(false) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
     var showQuickActions by remember { mutableStateOf(false) }
+    var showChatHistory by remember { mutableStateOf(false) }
 
     val haptic = LocalHapticFeedback.current
     val continuousVoiceMode by viewModel.continuousVoiceMode.collectAsState()
+
+    // Extract last action for the Orb colors
+    val lastAction = remember(uiState.messages) {
+        uiState.messages.lastOrNull { it.actionType != null && !it.isLoading }?.actionType
+    }
 
     // Continuous voice mode state tracking
     var wasSpeaking by remember { mutableStateOf(false) }
@@ -103,7 +113,7 @@ fun ChatScreen(
     }
 
     Scaffold(
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color(0xFF0A0E1A), // Sleek deep space black
         // ═══════════════════════════════════════
         // TOP BAR
         // ═══════════════════════════════════════
@@ -128,65 +138,219 @@ fun ChatScreen(
                 onDiagnostics = {
                     showMenu = false
                     showDiagnosticsDialog = true
-                }
+                },
+                showChatHistory = showChatHistory,
+                onToggleChatHistory = { showChatHistory = !showChatHistory }
             )
         }
     ) { paddingValues ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // ═══════════════════════════════════════
-            // MESSAGE LIST
-            // ═══════════════════════════════════════
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                state = listState,
-                contentPadding = PaddingValues(vertical = 8.dp)
-            ) {
-                items(
-                    items = uiState.messages.filter { !it.isLoading },
-                    key = { it.id }
-                ) { message ->
-                    MessageBubble(
-                        message = message,
-                        modifier = Modifier.animateItem()
-                    )
-                }
+            // Sci-fi corner brackets HUD background decoration
+            HudCornerBrackets(modifier = Modifier.fillMaxSize())
 
-                // Typing indicator
-                if (uiState.isAiThinking) {
-                    item(key = "typing") {
-                        TypingIndicator(modifier = Modifier.animateItem())
+            Column(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (!showChatHistory) {
+                    // ═══════════════════════════════════════
+                    // 🤖 FRIDAY HOME MODE (Living Orb + Status)
+                    // ═══════════════════════════════════════
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            // Immersive glowing Friday logo
+                            Text(
+                                text = "F.R.I.D.A.Y. SYSTEM",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF00F0FF).copy(alpha = 0.8f),
+                                letterSpacing = 4.sp,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            // Main Interactive Orb
+                            FridayOrb(
+                                isListening = uiState.isListening,
+                                isAiThinking = uiState.isAiThinking,
+                                isSpeaking = uiState.isSpeaking,
+                                lastAction = lastAction,
+                                modifier = Modifier.size(280.dp)
+                            )
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
+                            // Interactive Status Label
+                            Text(
+                                text = when {
+                                    uiState.isListening -> "Listening..."
+                                    uiState.isAiThinking -> "Thinking..."
+                                    uiState.isSpeaking -> "Speaking..."
+                                    else -> "Friday is online. Say 'Hey Friday'"
+                                },
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Medium,
+                                color = when {
+                                    uiState.isListening -> Color(0xFF00F0FF)
+                                    uiState.isAiThinking -> Color(0xFFD000FF)
+                                    uiState.isSpeaking -> Color(0xFF00FF88)
+                                    else -> Color.White
+                                }
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Action / Response details pill
+                            val responseText = uiState.messages.lastOrNull { it.sender == MessageSender.AI && !it.isLoading }?.content ?: ""
+                            if (responseText.isNotBlank()) {
+                                Surface(
+                                    color = Color(0xFF111827).copy(alpha = 0.6f),
+                                    shape = RoundedCornerShape(16.dp),
+                                    border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.2f)),
+                                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp)
+                                ) {
+                                    Text(
+                                        text = responseText.take(120) + if (responseText.length > 120) "..." else "",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = Color.White.copy(alpha = 0.8f),
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                        maxLines = 3
+                                    )
+                                }
+                            }
+                        }
+
+                        // Sliding Holographic Action Card
+                        AnimatedVisibility(
+                            visible = lastAction != null && (uiState.isSpeaking || uiState.isAiThinking),
+                            enter = slideInVertically { it } + fadeIn(),
+                            exit = slideOutVertically { it } + fadeOut(),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 16.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFF111827).copy(alpha = 0.8f),
+                                shape = RoundedCornerShape(20.dp),
+                                border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.4f)),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 24.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(40.dp)
+                                            .background(
+                                                color = Color(0xFF00F0FF).copy(alpha = 0.15f),
+                                                shape = CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = when (lastAction?.uppercase()) {
+                                                "CALL" -> Icons.Default.Phone
+                                                "SMS", "WHATSAPP_MSG" -> Icons.Default.Message
+                                                "YOUTUBE_SEARCH" -> Icons.Default.PlayArrow
+                                                "SET_ALARM", "SET_TIMER" -> Icons.Default.Alarm
+                                                else -> Icons.Default.AutoAwesome
+                                            },
+                                            contentDescription = null,
+                                            tint = Color(0xFF00F0FF)
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column {
+                                        Text(
+                                            text = "Executing Task",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color(0xFF00F0FF),
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            text = when (lastAction?.uppercase()) {
+                                                "CALL" -> "Placing call..."
+                                                "SMS" -> "Sending SMS..."
+                                                "WHATSAPP_MSG" -> "Opening WhatsApp..."
+                                                "YOUTUBE_SEARCH" -> "Searching YouTube..."
+                                                "SET_ALARM" -> "Setting system alarm..."
+                                                else -> "Triggering action: $lastAction"
+                                            },
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // ═══════════════════════════════════════
+                    // 💬 CHAT LOG MODE
+                    // ═══════════════════════════════════════
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        state = listState,
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        items(
+                            items = uiState.messages.filter { !it.isLoading },
+                            key = { it.id }
+                        ) { message ->
+                            MessageBubble(
+                                message = message,
+                                modifier = Modifier.animateItem()
+                            )
+                        }
+
+                        // Typing indicator
+                        if (uiState.isAiThinking) {
+                            item(key = "typing") {
+                                TypingIndicator(modifier = Modifier.animateItem())
+                            }
+                        }
                     }
                 }
-            }
 
-            // ═══════════════════════════════════════
-            // INPUT BAR
-            // ═══════════════════════════════════════
-            ChatInputBar(
-                inputText = uiState.inputText,
-                isListening = uiState.isListening,
-                isAiThinking = uiState.isAiThinking,
-                onTextChange = { viewModel.updateInputText(it) },
-                onSend = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.sendMessage()
-                    focusManager.clearFocus()
-                },
-                onVoiceClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    viewModel.toggleListening()
-                },
-                onCameraClick = onNavigateToCamera,
-                onQuickActionsClick = {
-                    showQuickActions = true
-                }
-            )
+                // ═══════════════════════════════════════
+                // INPUT BAR (Sleek Glassmorphic style)
+                // ═══════════════════════════════════════
+                ChatInputBar(
+                    inputText = uiState.inputText,
+                    isListening = uiState.isListening,
+                    isAiThinking = uiState.isAiThinking,
+                    onTextChange = { viewModel.updateInputText(it) },
+                    onSend = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.sendMessage()
+                        focusManager.clearFocus()
+                    },
+                    onVoiceClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        viewModel.toggleListening()
+                    },
+                    onCameraClick = onNavigateToCamera,
+                    onQuickActionsClick = {
+                        showQuickActions = true
+                    }
+                )
+            }
         }
     }
 
@@ -495,6 +659,36 @@ fun ChatScreen(
     }
 }
 
+/**
+ * Sci-Fi HUD Corner Brackets Background Decoration
+ */
+@Composable
+private fun HudCornerBrackets(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier) {
+        val strokeWidth = 2.dp.toPx()
+        val bracketSize = 24.dp.toPx()
+        val w = size.width
+        val h = size.height
+        val color = Color(0xFF00F0FF).copy(alpha = 0.35f) // Bright holographic cyan
+
+        // Top Left
+        drawLine(color, Offset(8.dp.toPx(), 8.dp.toPx()), Offset(8.dp.toPx() + bracketSize, 8.dp.toPx()), strokeWidth)
+        drawLine(color, Offset(8.dp.toPx(), 8.dp.toPx()), Offset(8.dp.toPx(), 8.dp.toPx() + bracketSize), strokeWidth)
+
+        // Top Right
+        drawLine(color, Offset(w - 8.dp.toPx(), 8.dp.toPx()), Offset(w - 8.dp.toPx() - bracketSize, 8.dp.toPx()), strokeWidth)
+        drawLine(color, Offset(w - 8.dp.toPx(), 8.dp.toPx()), Offset(w - 8.dp.toPx(), 8.dp.toPx() + bracketSize), strokeWidth)
+
+        // Bottom Left
+        drawLine(color, Offset(8.dp.toPx(), h - 8.dp.toPx()), Offset(8.dp.toPx() + bracketSize, h - 8.dp.toPx()), strokeWidth)
+        drawLine(color, Offset(8.dp.toPx(), h - 8.dp.toPx()), Offset(8.dp.toPx(), h - 8.dp.toPx() - bracketSize), strokeWidth)
+
+        // Bottom Right
+        drawLine(color, Offset(w - 8.dp.toPx(), h - 8.dp.toPx()), Offset(w - 8.dp.toPx() - bracketSize, h - 8.dp.toPx()), strokeWidth)
+        drawLine(color, Offset(w - 8.dp.toPx(), h - 8.dp.toPx()), Offset(w - 8.dp.toPx(), h - 8.dp.toPx() - bracketSize), strokeWidth)
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════
 // TOP BAR
 // ═══════════════════════════════════════════════════════════════
@@ -511,20 +705,22 @@ private fun ChatTopBar(
     onMenuToggle: () -> Unit,
     onClearChat: () -> Unit,
     onSettings: () -> Unit = {},
-    onDiagnostics: () -> Unit = {}
+    onDiagnostics: () -> Unit = {},
+    showChatHistory: Boolean,
+    onToggleChatHistory: () -> Unit
 ) {
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // AI avatar
+                // AI avatar (Friday holographic cube/circle)
                 Box(
                     modifier = Modifier
                         .size(36.dp)
                         .background(
                             brush = Brush.linearGradient(
                                 listOf(
-                                    MaterialTheme.colorScheme.primary,
-                                    MaterialTheme.colorScheme.secondary
+                                    Color(0xFF00F0FF),
+                                    Color(0xFFD000FF)
                                 )
                             ),
                             shape = RoundedCornerShape(12.dp)
@@ -539,39 +735,49 @@ private fun ChatTopBar(
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
-                        "MyAI Assistant",
+                        "FRIDAY AI",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onBackground
+                        color = Color.White,
+                        letterSpacing = 2.sp
                     )
                     Text(
                         text = when {
-                            isAiThinking -> "Soch raha hoon..."
+                            isAiThinking -> "ANALYZING..."
                             else -> when(aiSource) {
-                                "ollama" -> "🟢 Ollama Local"
-                                "gemini" -> "🔵 Gemini Cloud"
-                                else -> "⚪ Offline"
+                                "ollama" -> "LOCAL SECURE"
+                                "gemini" -> "CLOUD LINK"
+                                else -> "OFFLINE CORE"
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
                             isAiThinking -> WarningColor
                             aiSource == "ollama" -> SuccessColor
-                            aiSource == "gemini" -> MaterialTheme.colorScheme.primary
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            aiSource == "gemini" -> Color(0xFF00F0FF)
+                            else -> Color.Gray
                         },
-                        fontSize = 11.sp
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
         },
         actions = {
+            // Sleek Chat History View toggle button
+            IconButton(onClick = onToggleChatHistory) {
+                Icon(
+                    imageVector = if (showChatHistory) Icons.Filled.Radar else Icons.Filled.Chat,
+                    contentDescription = "Toggle Chat History",
+                    tint = if (showChatHistory) Color(0xFF00F0FF) else Color.White
+                )
+            }
             // Voice output toggle
             IconButton(onClick = onToggleVoice) {
                 Icon(
                     imageVector = if (isVoiceEnabled) Icons.Filled.VolumeUp else Icons.Filled.VolumeOff,
                     contentDescription = "Voice",
-                    tint = if (isVoiceEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (isVoiceEnabled) Color(0xFF00F0FF) else Color.Gray
                 )
             }
             // Continuous voice mode toggle
@@ -579,7 +785,7 @@ private fun ChatTopBar(
                 Icon(
                     imageVector = Icons.Filled.Hearing,
                     contentDescription = "Continuous Voice Mode",
-                    tint = if (isContinuousVoiceEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                    tint = if (isContinuousVoiceEnabled) Color(0xFF00F0FF) else Color.Gray.copy(alpha = 0.5f)
                 )
             }
             // Menu
@@ -587,27 +793,31 @@ private fun ChatTopBar(
                 IconButton(onClick = onMenuToggle) {
                     Icon(
                         Icons.Filled.MoreVert, "Menu",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = Color.White
                     )
                 }
-                DropdownMenu(expanded = showMenu, onDismissRequest = { onMenuToggle() }) {
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { onMenuToggle() },
+                    modifier = Modifier.background(Color(0xFF111827))
+                ) {
                     DropdownMenuItem(
-                        text = { Text("🗑️ Clear Chat") },
+                        text = { Text("🗑️ Clear Chat", color = Color.White) },
                         onClick = onClearChat
                     )
                     DropdownMenuItem(
-                        text = { Text("⚙️ Settings") },
+                        text = { Text("⚙️ Settings", color = Color.White) },
                         onClick = onSettings
                     )
                     DropdownMenuItem(
-                        text = { Text("🔧 Diagnostics & Test") },
+                        text = { Text("🔧 Diagnostics & Test", color = Color.White) },
                         onClick = onDiagnostics
                     )
                 }
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.background
+            containerColor = Color(0xFF0A0E1A)
         )
     )
 }
@@ -627,8 +837,9 @@ private fun ChatInputBar(
     onQuickActionsClick: () -> Unit
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 8.dp
+        color = Color(0xFF111827).copy(alpha = 0.8f),
+        shadowElevation = 8.dp,
+        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.15f))
     ) {
         Row(
             modifier = Modifier
@@ -643,7 +854,7 @@ private fun ChatInputBar(
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        color = Color(0xFF1F2937).copy(alpha = 0.5f)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -651,7 +862,7 @@ private fun ChatInputBar(
                     Icon(
                         Icons.Filled.Widgets,
                         contentDescription = "Quick Actions",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = Color.White
                     )
                 }
             }
@@ -667,16 +878,18 @@ private fun ChatInputBar(
                     .heightIn(min = 48.dp, max = 120.dp),
                 placeholder = {
                     Text(
-                        "Kuch poocho...",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+                        "Ask Friday anything...",
+                        color = Color.White.copy(alpha = 0.4f)
                     )
                 },
                 shape = RoundedCornerShape(24.dp),
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f),
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    focusedBorderColor = Color(0xFF00F0FF),
+                    unfocusedBorderColor = Color(0xFF1F2937),
+                    focusedContainerColor = Color(0xFF0A0E1A).copy(alpha = 0.6f),
+                    unfocusedContainerColor = Color(0xFF0A0E1A).copy(alpha = 0.6f),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
                 ),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { if (inputText.isNotBlank()) onSend() }),
@@ -691,7 +904,7 @@ private fun ChatInputBar(
                     .size(48.dp)
                     .clip(CircleShape)
                     .background(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        color = Color(0xFF1F2937).copy(alpha = 0.5f)
                     ),
                 contentAlignment = Alignment.Center
             ) {
@@ -699,7 +912,7 @@ private fun ChatInputBar(
                     Icon(
                         Icons.Filled.PhotoCamera,
                         contentDescription = "Camera",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        tint = Color.White
                     )
                 }
             }
@@ -723,8 +936,8 @@ private fun ChatInputBar(
                         .background(
                             brush = Brush.linearGradient(
                                 listOf(
-                                    MaterialTheme.colorScheme.primary,
-                                    MaterialTheme.colorScheme.secondary
+                                    Color(0xFF00F0FF),
+                                    Color(0xFFD000FF)
                                 )
                             )
                         ),
@@ -759,9 +972,10 @@ private fun QuickActionCard(
         onClick = onClick,
         modifier = modifier.height(72.dp),
         shape = RoundedCornerShape(16.dp),
+        border = if (active) BorderStroke(1.dp, Color(0xFF00F0FF)) else null,
         colors = CardDefaults.cardColors(
-            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer 
-                             else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            containerColor = if (active) Color(0xFF0F2636)
+                             else Color(0xFF111827).copy(alpha = 0.6f)
         )
     ) {
         Row(
@@ -774,8 +988,8 @@ private fun QuickActionCard(
                 modifier = Modifier
                     .size(36.dp)
                     .background(
-                        color = if (active) MaterialTheme.colorScheme.primary 
-                                 else MaterialTheme.colorScheme.surfaceVariant,
+                        color = if (active) Color(0xFF00F0FF) 
+                                 else Color(0xFF1F2937),
                         shape = CircleShape
                     ),
                 contentAlignment = Alignment.Center
@@ -783,8 +997,8 @@ private fun QuickActionCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = title,
-                    tint = if (active) MaterialTheme.colorScheme.onPrimary 
-                           else MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = if (active) Color.Black 
+                           else Color.White
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
@@ -795,15 +1009,14 @@ private fun QuickActionCard(
                     text = title,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer 
-                           else MaterialTheme.colorScheme.onSurface,
+                    color = Color.White,
                     maxLines = 1
                 )
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (active) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f) 
-                           else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (active) Color(0xFF00F0FF) 
+                           else Color.Gray,
                     maxLines = 1
                 )
             }

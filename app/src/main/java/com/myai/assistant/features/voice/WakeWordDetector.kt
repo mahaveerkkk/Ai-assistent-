@@ -39,6 +39,10 @@ class WakeWordDetector @Inject constructor() {
 
         // Wake word list — lowercase mein match hoga
         private val WAKE_WORDS = listOf(
+            "friday",
+            "hey friday",
+            "ok friday",
+            "hello friday",
             "hey assistant",
             "hello assistant",
             "ok assistant",
