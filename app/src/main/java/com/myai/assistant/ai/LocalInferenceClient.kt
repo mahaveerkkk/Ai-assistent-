@@ -7,14 +7,12 @@ import android.content.Context
 import android.util.Log
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
-import com.google.ai.edge.litertlm.Message
 import com.myai.assistant.ai.models.AiParsedResponse
 import com.myai.assistant.ai.models.AiResponseParser
 import com.myai.assistant.ai.models.AiSource
 import com.myai.assistant.data.repository.SettingsRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.reduce
 import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
@@ -87,21 +85,16 @@ class LocalInferenceClient @Inject constructor(
             Log.d(TAG, "🧠 Running Local Inference...")
             val activeEngine = engine ?: return@withContext AiResponseParser.errorResponse("LiteRT Engine lost", AiSource.FALLBACK)
             
-            // Create a conversation session
+            // Create a conversation session and send message synchronously
+            // Using sendMessage(String) which is the stable synchronous API in 0.8.0
             val conversation = activeEngine.createConversation()
+            val responseMessage = conversation.sendMessage(prompt)
+            val fullResponse = responseMessage.text.trim()
             
-            val responseBuilder = StringBuilder()
-            
-            // Collect the response stream from LiteRT-LM Async Flow (Message Flow)
-            conversation.sendMessageAsync(Message.of(prompt)).collect { responseMessage ->
-                responseBuilder.append(responseMessage.text)
-            }
-            
-            val fullResponse = responseBuilder.toString().trim()
             Log.d(TAG, "✅ Local Inference finished: $fullResponse")
             
             // Parse response into standard structure
-            val parsed = AiResponseParser.parse(fullResponse, AiSource.OLLAMA) // Reuse Ollama source identifier for local
+            val parsed = AiResponseParser.parse(fullResponse, AiSource.OLLAMA)
             parsed
         } catch (e: Exception) {
             Log.e(TAG, "❌ Local Inference failed: ${e.message}", e)
