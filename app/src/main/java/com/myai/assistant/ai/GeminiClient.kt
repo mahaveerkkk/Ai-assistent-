@@ -24,6 +24,37 @@ class GeminiClient @Inject constructor() {
 
     var apiKey: String = BuildConfig.GEMINI_API_KEY  // from local.properties via BuildConfig
 
+    // Key rotation support — multiple keys comma-separated
+    private var keyList: MutableList<String> = mutableListOf()
+    private var currentKeyIndex = 0
+
+    /** Multiple Gemini keys set karo (comma-separated) */
+    fun setApiKeys(keysCommaSeparated: String) {
+        keyList = keysCommaSeparated.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .toMutableList()
+        if (keyList.isNotEmpty()) {
+            currentKeyIndex = 0
+            apiKey = keyList[0]
+            generativeModel = null
+        }
+    }
+
+    /** Next key pe rotate karo (quota exhausted pe) */
+    private fun rotateToNextKey(): Boolean {
+        if (keyList.size <= 1) return false
+        currentKeyIndex = (currentKeyIndex + 1) % keyList.size
+        val newKey = keyList[currentKeyIndex]
+        if (newKey != apiKey) {
+            Log.w(TAG, "🔄 Rotating Gemini key to index $currentKeyIndex")
+            apiKey = newKey
+            generativeModel = null  // Force re-init with new key
+            return true
+        }
+        return false
+    }
+
     private var generativeModel: GenerativeModel? = null
 
     /**
@@ -136,6 +167,13 @@ class GeminiClient @Inject constructor() {
 
         } catch (e: Exception) {
             Log.e(TAG, "Gemini error: ${e.message}", e)
+            // 429 = quota exhausted — try next key
+            val errMsg = e.message ?: ""
+            if ((errMsg.contains("429") || errMsg.contains("quota") || errMsg.contains("RESOURCE_EXHAUSTED"))
+                && rotateToNextKey()) {
+                Log.w(TAG, "♻️ Quota exhausted, retrying with new key...")
+                return@withContext chat(userMessage, chatHistory)  // Retry with new key
+            }
             AiResponseParser.errorResponse(
                 "Gemini error: ${e.message}",
                 AiSource.GEMINI

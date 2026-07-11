@@ -66,10 +66,15 @@ class AIClient @Inject constructor(
         ollamaClient.model = model
     }
 
-    // Gemini config
+    // Gemini config — supports multiple keys comma-separated for rotation
     fun setGeminiApiKey(key: String) {
         settingsRepository.geminiApiKey = key
-        geminiClient.updateApiKey(key)
+        if (key.contains(",")) {
+            // Multiple keys — enable rotation
+            geminiClient.setApiKeys(key)
+        } else {
+            geminiClient.updateApiKey(key)
+        }
     }
 
     /**
