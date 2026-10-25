@@ -45,6 +45,7 @@ class SystemControlManager @Inject constructor(
     @Volatile
     private var isFlashlightOn = false
     private var selectedCameraId: String? = null
+    private var torchCallback: Camera2Manager.TorchCallback? = null
 
     init {
         registerTorchCallback()
@@ -54,7 +55,7 @@ class SystemControlManager @Inject constructor(
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 val handler = Handler(Looper.getMainLooper())
-                camera2Manager.registerTorchCallback(object : Camera2Manager.TorchCallback() {
+                val callback = object : Camera2Manager.TorchCallback() {
                     override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
                         super.onTorchModeChanged(cameraId, enabled)
                         if (selectedCameraId == null || cameraId == selectedCameraId) {
@@ -70,10 +71,29 @@ class SystemControlManager @Inject constructor(
                             Log.w(TAG, "⚠️ Torch mode unavailable for camera: $cameraId")
                         }
                     }
-                }, handler)
+                }
+                torchCallback = callback
+                camera2Manager.registerTorchCallback(callback, handler)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to register torch callback: ${e.message}")
+        }
+    }
+
+    /**
+     * Unregister hardware callbacks to prevent memory leaks
+     */
+    fun cleanup() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                torchCallback?.let {
+                    camera2Manager.unregisterTorchCallback(it)
+                    torchCallback = null
+                    Log.d(TAG, "Torch callback unregistered cleanly")
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error unregistering torch callback: ${e.message}")
         }
     }
 
@@ -370,9 +390,15 @@ class SystemControlManager @Inject constructor(
                         audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
                         true
                     } else {
-                        audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
-                        Log.d(TAG, "🔇 Ringer set to SILENT")
-                        true
+                        try {
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_SILENT
+                            Log.d(TAG, "🔇 Ringer set to SILENT")
+                            true
+                        } catch (e: SecurityException) {
+                            Log.w(TAG, "SecurityException setting silent mode: ${e.message}")
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_VIBRATE
+                            true
+                        }
                     }
                 }
                 "vibrate" -> {
@@ -381,9 +407,21 @@ class SystemControlManager @Inject constructor(
                     true
                 }
                 "normal" -> {
-                    audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
-                    Log.d(TAG, "🔔 Ringer set to NORMAL")
-                    true
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && !notificationManager.isNotificationPolicyAccessGranted) {
+                        try {
+                            audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                            Log.d(TAG, "🔔 Ringer set to NORMAL")
+                            true
+                        } catch (e: SecurityException) {
+                            Log.w(TAG, "DND access needed to exit silent/DND mode, opening settings: ${e.message}")
+                            openDndSettings()
+                            false
+                        }
+                    } else {
+                        audioManager.ringerMode = AudioManager.RINGER_MODE_NORMAL
+                        Log.d(TAG, "🔔 Ringer set to NORMAL")
+                        true
+                    }
                 }
                 "dnd_on", "on" -> {
                     if (notificationManager.isNotificationPolicyAccessGranted) {

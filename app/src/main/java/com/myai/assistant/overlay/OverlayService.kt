@@ -3,14 +3,19 @@
 
 package com.myai.assistant.overlay
 
+import android.Manifest
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.myai.assistant.MyAIApp
 import com.myai.assistant.ui.MainActivity
 import dagger.hilt.android.AndroidEntryPoint
@@ -52,7 +57,28 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(NOTIFICATION_ID, createNotification())
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val hasRecordAudio = ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+                if (hasRecordAudio) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        createNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, createNotification())
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification())
+            }
+        } catch (e: Exception) {
+            // Android 14 ForegroundServiceStartNotAllowedException safeguard
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
 
         voiceManager.initialize(this)
         geminiTts.initialize(this)

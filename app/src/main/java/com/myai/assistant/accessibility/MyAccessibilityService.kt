@@ -97,6 +97,9 @@ class MyAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "❌ Accessibility Service DESTROYED")
+        if (::systemControlManager.isInitialized) {
+            systemControlManager.cleanup()
+        }
         _instance = null
         serviceScope.cancel()
     }

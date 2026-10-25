@@ -169,7 +169,9 @@ class AppAutomator(
         }
 
         // 3. Fallback: Search all clickable icon views near bottom right
-        return clickByContentDescription("Send")
+        if (clickByContentDescription("Send")) return true
+
+        return false
     }
 
     /**
@@ -183,6 +185,19 @@ class AppAutomator(
                 Log.d(TAG, "✅ WhatsApp Send button clicked on attempt #$attempt")
                 return true
             }
+
+            // After attempt 8, try coordinate tap on bottom-right send zone as last resort
+            if (attempt >= 8) {
+                val displayMetrics = service.resources.displayMetrics
+                val tapX = (displayMetrics.widthPixels * 0.92f)
+                val tapY = (displayMetrics.heightPixels * 0.94f)
+                if (actionPerformer.tapAtCoordinates(tapX, tapY)) {
+                    Log.d(TAG, "✅ WhatsApp Send tapped via coordinate fallback on attempt #$attempt")
+                    return true
+                }
+            }
+        }
+        return false
         }
         Log.w(TAG, "WhatsApp Send button not found after $maxAttempts attempts")
         return false

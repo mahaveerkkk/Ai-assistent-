@@ -12,6 +12,7 @@ import com.myai.assistant.ai.models.AiParsedResponse
 import com.myai.assistant.ai.models.AiResponseParser
 import com.myai.assistant.ai.models.AiSource
 import com.myai.assistant.ai.models.SYSTEM_PROMPT
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -46,6 +47,7 @@ class GeminiClient @Inject constructor() {
     }
 
     /** Multiple Gemini keys set karo (comma-separated) */
+    @Synchronized
     fun setApiKeys(keysCommaSeparated: String) {
         val parsed = keysCommaSeparated.split(",")
             .map { it.trim() }
@@ -61,6 +63,7 @@ class GeminiClient @Inject constructor() {
     }
 
     /** Runtime key update */
+    @Synchronized
     fun updateApiKey(key: String) {
         val trimmed = key.trim()
         if (trimmed.contains(",")) {
@@ -75,6 +78,7 @@ class GeminiClient @Inject constructor() {
     }
 
     /** Next key pe rotate karo (quota exhausted / 429 pe) */
+    @Synchronized
     private fun rotateToNextKey(): Boolean {
         if (keyList.size <= 1) return false
         currentKeyIndex = (currentKeyIndex + 1) % keyList.size
@@ -100,6 +104,7 @@ class GeminiClient @Inject constructor() {
     /**
      * Gemini model initialize karo
      */
+    @Synchronized
     private fun getOrCreateModel(): GenerativeModel {
         if (generativeModel == null) {
             Log.d(TAG, "Creating Gemini GenerativeModel with key index $currentKeyIndex (len: ${apiKey.length})")
@@ -203,6 +208,8 @@ class GeminiClient @Inject constructor() {
             Log.d(TAG, "Gemini response received (${responseText.length} chars)")
             AiResponseParser.parse(responseText, AiSource.GEMINI)
 
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Gemini error: ${e.message}", e)
 

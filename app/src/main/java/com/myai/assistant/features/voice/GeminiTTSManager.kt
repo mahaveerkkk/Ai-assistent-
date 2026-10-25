@@ -496,6 +496,7 @@ class GeminiTTSManager @Inject constructor() {
                 }
 
                 // Stream chunk into AudioTrack
+                if (!currentCoroutineContext().isActive) break
                 track?.let { t ->
                     if (t.state == AudioTrack.STATE_INITIALIZED && t.playState == AudioTrack.PLAYSTATE_PLAYING) {
                         val written = t.write(chunk, 0, chunk.size, AudioTrack.WRITE_BLOCKING)
@@ -509,20 +510,25 @@ class GeminiTTSManager @Inject constructor() {
 
             // Channel closed normally — wait for all queued audio frames to play through DAC
             track?.let { t ->
-                if (t.state == AudioTrack.STATE_INITIALIZED) {
+                if (t.state == AudioTrack.STATE_INITIALIZED && t.playState == AudioTrack.PLAYSTATE_PLAYING) {
                     val sampleRate = currentSampleRate
                     val totalFrames = totalFramesWritten.get()
 
-                    // Wait until playbackHeadPosition reaches total frames or timeout
-                    val maxWaitMs = ((totalFrames * 1000L / sampleRate) + 500L).coerceIn(200L, 10_000L)
+                    // Wait until playbackHeadPosition reaches total frames, track stopped, or timeout
+                    val maxWaitMs = ((totalFrames * 1000L / sampleRate) + 500L).coerceIn(200L, 8_000L)
                     val startTime = System.currentTimeMillis()
 
-                    while (t.playbackHeadPosition < totalFrames && (System.currentTimeMillis() - startTime) < maxWaitMs) {
+                    while (t.playState == AudioTrack.PLAYSTATE_PLAYING &&
+                           t.playbackHeadPosition < totalFrames &&
+                           (System.currentTimeMillis() - startTime) < maxWaitMs &&
+                           currentCoroutineContext().isActive) {
                         delay(25)
                     }
 
-                    // Brief 50ms buffer to guarantee physical speaker output finishes smoothly
-                    delay(50)
+                    // Brief buffer to guarantee physical speaker output finishes smoothly
+                    if (currentCoroutineContext().isActive) {
+                        delay(40)
+                    }
                 }
             }
 
@@ -552,6 +558,9 @@ class GeminiTTSManager @Inject constructor() {
     }
 
     private fun stopAudioTrack() {
+        try {
+            audioChannel?.close()
+        } catch (_: Exception) {}
         playbackJob?.cancel()
         playbackJob = null
 

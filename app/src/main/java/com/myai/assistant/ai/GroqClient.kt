@@ -13,6 +13,7 @@ import com.myai.assistant.ai.models.AiParsedResponse
 import com.myai.assistant.ai.models.AiResponseParser
 import com.myai.assistant.ai.models.AiSource
 import com.myai.assistant.ai.models.SYSTEM_PROMPT
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -167,6 +168,8 @@ class GroqClient @Inject constructor() {
         } catch (e: IOException) {
             Log.e(TAG, "Groq network error: ${e.message}")
             AiResponseParser.errorResponse("Groq network error: ${e.message}", AiSource.GROQ)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Groq exception: ${e.message}", e)
             AiResponseParser.errorResponse("Groq error: ${e.message}", AiSource.GROQ)

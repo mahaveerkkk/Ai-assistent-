@@ -187,6 +187,14 @@ class AssistantBrain @Inject constructor(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
+    private val brainScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var automationJob: Job? = null
+
+    fun cleanup() {
+        automationJob?.cancel()
+        automationJob = null
+    }
+
     fun clearError() {
         _error.value = null
     }
@@ -634,7 +642,8 @@ class AssistantBrain @Inject constructor(
                             // Auto-send via Accessibility if active
                             val service = MyAccessibilityService.instance
                             if (service != null) {
-                                CoroutineScope(Dispatchers.Main).launch {
+                                automationJob?.cancel()
+                                automationJob = brainScope.launch {
                                     val sent = service.appAutomator.autoClickSendButton(maxAttempts = 12)
                                     if (sent) {
                                         chatRepository.saveSystemMessage("✅ WhatsApp message sent to '$displayName'")
@@ -650,7 +659,8 @@ class AssistantBrain @Inject constructor(
                             val service = MyAccessibilityService.instance
                             if (service != null) {
                                 chatRepository.saveSystemMessage("📱 Searching '$contact' in WhatsApp...")
-                                CoroutineScope(Dispatchers.Main).launch {
+                                automationJob?.cancel()
+                                automationJob = brainScope.launch {
                                     val ok = service.appAutomator.sendWhatsAppMessage(contact, msg)
                                     chatRepository.saveSystemMessage(
                                         if (ok) "✅ Message sent to '$contact' via WhatsApp"

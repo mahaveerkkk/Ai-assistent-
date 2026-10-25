@@ -224,7 +224,8 @@ class OverlayManager(private val context: Context) {
      * Floating bubble dikhao (WindowManager integration)
      */
     fun showBubble() {
-        if (isShowing) return
+        if (isShowing && bubbleContainer?.isAttachedToWindow == true) return
+        hideBubble()
 
         val bubbleSize = dpToPx(60)
         val params = WindowManager.LayoutParams(
@@ -320,11 +321,17 @@ class OverlayManager(private val context: Context) {
                     }
 
                     if (isDragging) {
-                        params.x = (initialParamsX + dx).toInt()
-                        params.y = (initialParamsY + dy).toInt()
-                        try {
-                            windowManager.updateViewLayout(container, params)
-                        } catch (_: Exception) {}
+                        val newX = (initialParamsX + dx).toInt()
+                        val newY = (initialParamsY + dy).toInt()
+                        if (kotlin.math.abs(newX - params.x) > 2 || kotlin.math.abs(newY - params.y) > 2) {
+                            params.x = newX
+                            params.y = newY
+                            try {
+                                if (container.isAttachedToWindow) {
+                                    windowManager.updateViewLayout(container, params)
+                                }
+                            } catch (_: Exception) {}
+                        }
                     }
                     true
                 }
@@ -402,7 +409,11 @@ class OverlayManager(private val context: Context) {
         edgeSnapAnimator?.cancel()
 
         try {
-            bubbleContainer?.let { windowManager.removeView(it) }
+            bubbleContainer?.let {
+                if (it.isAttachedToWindow) {
+                    windowManager.removeView(it)
+                }
+            }
         } catch (_: Exception) {}
 
         bubbleContainer = null

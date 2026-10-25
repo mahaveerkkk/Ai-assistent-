@@ -92,12 +92,20 @@ class ActionPerformer(
         }
 
         // Agar node clickable nahi hai, parent pe try karo
-        var parent = node.parent
-        while (parent != null) {
-            if (parent.isClickable) {
-                return parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        var currentParent = node.parent
+        while (currentParent != null) {
+            if (currentParent.isClickable) {
+                val clicked = currentParent.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    try { currentParent.recycle() } catch (_: Exception) {}
+                }
+                return clicked
             }
-            parent = parent.parent
+            val nextParent = currentParent.parent
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                try { currentParent.recycle() } catch (_: Exception) {}
+            }
+            currentParent = nextParent
         }
 
         // Last resort — gesture click

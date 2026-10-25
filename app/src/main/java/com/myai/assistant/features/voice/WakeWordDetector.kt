@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -63,6 +64,7 @@ class WakeWordDetector @Inject constructor() {
     // STATE
     // ═══════════════════════════════════════
 
+    private val WAKE_TOKEN = Any()
     private val _isActive = MutableStateFlow(false)
     val isActive: StateFlow<Boolean> = _isActive.asStateFlow()
 
@@ -184,7 +186,7 @@ class WakeWordDetector @Inject constructor() {
             mainHandler.removeCallbacks(it)
             pendingRestartRunnable = null
         }
-        mainHandler.removeCallbacksAndMessages(null)
+        mainHandler.removeCallbacksAndMessages(WAKE_TOKEN)
     }
 
     // ═══════════════════════════════════════
@@ -326,12 +328,13 @@ class WakeWordDetector @Inject constructor() {
 
         cancelPendingRestarts()
         val runnable = Runnable {
+            pendingRestartRunnable = null
             if (isLooping && _isActive.value) {
                 startListeningCycle()
             }
         }
         pendingRestartRunnable = runnable
-        mainHandler.postDelayed(runnable, delayMs)
+        mainHandler.postAtTime(runnable, WAKE_TOKEN, SystemClock.uptimeMillis() + delayMs)
     }
 
     private fun scheduleBackoffRestart() {

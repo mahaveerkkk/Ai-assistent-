@@ -1234,18 +1234,8 @@ private fun QuickActionCard(
     }
 }
 
-// Reusable cached framework Paint and RectF objects to eliminate GC churn on draw
-private val cachedGlowPaint = android.graphics.Paint().apply {
-    isAntiAlias = true
-    style = android.graphics.Paint.Style.FILL
-}
-private val cachedRectF = android.graphics.RectF()
-private var cachedGlowRadius = -1f
-private var cachedBlurFilter: android.graphics.BlurMaskFilter? = null
-
 /**
- * High-performance neon glow shadow modifier using reusable Paint & BlurMaskFilter.
- * Zero allocations per frame.
+ * Thread-safe neon glow shadow modifier using DrawScope.
  */
 fun Modifier.neonShadow(
     color: Color = Color(0xFF00F0FF),
@@ -1255,17 +1245,16 @@ fun Modifier.neonShadow(
     val glowPx = glowRadius.toPx()
     if (glowPx <= 0f) return@drawBehind
 
-    cachedGlowPaint.color = color.toArgb()
-
-    if (cachedGlowRadius != glowPx) {
-        cachedGlowRadius = glowPx
-        cachedBlurFilter = android.graphics.BlurMaskFilter(glowPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        style = android.graphics.Paint.Style.FILL
+        this.color = color.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(glowPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
     }
-    cachedGlowPaint.maskFilter = cachedBlurFilter
 
     drawIntoCanvas { canvas ->
-        cachedRectF.set(0f, 0f, size.width, size.height)
+        val rect = android.graphics.RectF(0f, 0f, size.width, size.height)
         val cornerPx = borderRadius.toPx()
-        canvas.nativeCanvas.drawRoundRect(cachedRectF, cornerPx, cornerPx, cachedGlowPaint)
+        canvas.nativeCanvas.drawRoundRect(rect, cornerPx, cornerPx, paint)
     }
 }

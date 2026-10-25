@@ -321,25 +321,21 @@ object AiResponseParser {
 
         var depth = 0
         var inString = false
-        var isEscaped = false
+        var consecutiveBackslashes = 0
 
         for (i in startIndex until str.length) {
             val char = str[i]
 
-            if (isEscaped) {
-                isEscaped = false
-                continue
-            }
-
             if (char == '\\' && inString) {
-                isEscaped = true
+                consecutiveBackslashes++
                 continue
             }
 
-            if (char == '"') {
+            if (char == '"' && (consecutiveBackslashes % 2 == 0)) {
                 inString = !inString
-                continue
             }
+
+            consecutiveBackslashes = 0
 
             if (!inString) {
                 if (char == '{') {
