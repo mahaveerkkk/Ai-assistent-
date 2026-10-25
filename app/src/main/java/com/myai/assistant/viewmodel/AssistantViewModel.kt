@@ -325,6 +325,7 @@ class AssistantViewModel @Inject constructor(
     // ═══════════════════════════════════════
 
     fun setOllamaUrl(url: String) = aiClient.setOllamaUrl(url)
+    fun setOllamaModel(model: String) = aiClient.setOllamaModel(model)
 
     fun setGeminiApiKey(key: String) {
         settings.geminiApiKey = key

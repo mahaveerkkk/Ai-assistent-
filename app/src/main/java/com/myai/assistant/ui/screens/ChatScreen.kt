@@ -163,7 +163,7 @@ fun ChatScreen(
                     // ═══════════════════════════════════════
                     // 🤖 FRIDAY HOME MODE (Living Orb + Status)
                     // ═══════════════════════════════════════
-                    AnimatedVisibility(
+                    androidx.compose.animation.AnimatedVisibility(
                         visible = !showChatHistory,
                         enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
                                 scaleIn(initialScale = 0.92f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
@@ -359,7 +359,7 @@ fun ChatScreen(
                             val isExecuting = uiState.isSpeaking || uiState.isAiThinking || (lastMessageForCard?.isLoading == true)
 
                             // Sliding Holographic Action Card
-                            AnimatedVisibility(
+                            androidx.compose.animation.AnimatedVisibility(
                                 visible = lastAction != null && (isExecuting || isSuccessStateForCard || isErrorStateForCard),
                                 enter = slideInVertically { it } + fadeIn(),
                                 exit = slideOutVertically { it } + fadeOut(),
@@ -498,7 +498,7 @@ fun ChatScreen(
                     // ═══════════════════════════════════════
                     // 💬 CHAT LOG MODE
                     // ═══════════════════════════════════════
-                    AnimatedVisibility(
+                    androidx.compose.animation.AnimatedVisibility(
                         visible = showChatHistory,
                         enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
                                 scaleIn(initialScale = 1.08f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
