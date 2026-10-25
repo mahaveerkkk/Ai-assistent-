@@ -29,17 +29,38 @@ class LocalInferenceClient @Inject constructor(
     }
 
     private var isInitialized = false
+    private var lastInitError: String? = null
+    private var _engine: Any? = null
 
     /**
      * Initialize the LiteRT engine via reflection to avoid compile-time API issues
      */
     suspend fun initialize(): Boolean = withContext(Dispatchers.IO) {
         val modelPath = settingsRepository.liteRtModelPath
-        val modelFile = File(modelPath)
+        
+        if (modelPath.isBlank()) {
+            lastInitError = "LiteRT model path is blank in Settings. Please enter a valid path."
+            Log.w(TAG, "❌ $lastInitError")
+            return@withContext false
+        }
 
+        val modelFile = File(modelPath)
         if (!modelFile.exists()) {
+            lastInitError = "Model file not found at '$modelPath'. Please download a compatible LiteRT-LM model (e.g. Gemma 2B in .bin or .task format) to your device and configure its absolute path in Settings."
             Log.w(TAG, "❌ LiteRT model file not found at: $modelPath")
             return@withContext false
+        }
+
+        // Clean up previous engine to avoid memory leaks before creating a new one
+        _engine?.let { oldEngine ->
+            try {
+                Log.d(TAG, "Closing existing LiteRT-LM Engine before re-initializing")
+                oldEngine.javaClass.getMethod("close").invoke(oldEngine)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to close existing engine: ${e.message}")
+            }
+            _engine = null
+            isInitialized = false
         }
 
         return@withContext try {
@@ -60,17 +81,29 @@ class LocalInferenceClient @Inject constructor(
             // Store engine for later use
             _engine = engine
             isInitialized = true
+            lastInitError = null
             Log.d(TAG, "✅ LiteRT-LM Engine initialized via reflection")
             true
+        } catch (e: ClassNotFoundException) {
+            lastInitError = "LiteRT-LM library dependencies not found in classpath. Ensure you have added the appropriate com.google.ai.edge:litert-lm dependency in build.gradle."
+            Log.e(TAG, "❌ LiteRT-LM init failed: ClassNotFoundException - ${e.message}", e)
+            isInitialized = false
+            _engine = null
+            false
+        } catch (e: NoSuchMethodException) {
+            lastInitError = "Incompatible LiteRT-LM library version. The reflection methods/constructors did not match."
+            Log.e(TAG, "❌ LiteRT-LM init failed: NoSuchMethodException - ${e.message}", e)
+            isInitialized = false
+            _engine = null
+            false
         } catch (e: Exception) {
-            Log.e(TAG, "❌ LiteRT-LM init failed: ${e.message}")
+            lastInitError = "LiteRT-LM initialization failed: ${e.localizedMessage ?: e.message}"
+            Log.e(TAG, "❌ LiteRT-LM init failed: ${e.message}", e)
             isInitialized = false
             _engine = null
             false
         }
     }
-
-    private var _engine: Any? = null
 
     /**
      * Run inference using reflection — avoids all LiteRT compile-time API issues
@@ -79,13 +112,15 @@ class LocalInferenceClient @Inject constructor(
         if (!isInitialized || _engine == null) {
             val initSuccess = initialize()
             if (!initSuccess || _engine == null) {
+                val suggestion = lastInitError ?: "Please verify model path in Settings."
                 return@withContext AiResponseParser.errorResponse(
-                    "LiteRT-LM not initialized. Please verify model path in Settings.",
+                    "LiteRT-LM not initialized. $suggestion",
                     AiSource.FALLBACK
                 )
             }
         }
 
+        var conversation: Any? = null
         return@withContext try {
             Log.d(TAG, "🧠 Running LiteRT inference via reflection...")
             val engine = _engine ?: return@withContext AiResponseParser.errorResponse(
@@ -95,17 +130,26 @@ class LocalInferenceClient @Inject constructor(
             val engineClass = engine.javaClass
 
             // Create conversation
-            val conversation = engineClass.getMethod("createConversation").invoke(engine)
+            conversation = engineClass.getMethod("createConversation").invoke(engine)
             val convClass = conversation!!.javaClass
 
             // Try to find sendMessage method and build a Message
             val responseText = runInference(convClass, conversation, prompt)
 
             Log.d(TAG, "✅ LiteRT response: $responseText")
-            AiResponseParser.parse(responseText, AiSource.OLLAMA)
+            AiResponseParser.parse(responseText, AiSource.FALLBACK)
         } catch (e: Exception) {
             Log.e(TAG, "❌ LiteRT inference failed: ${e.message}", e)
             AiResponseParser.errorResponse("LiteRT error: ${e.message}", AiSource.FALLBACK)
+        } finally {
+            conversation?.let { conv ->
+                try {
+                    conv.javaClass.getMethod("close").invoke(conv)
+                    Log.d(TAG, "🔌 LiteRT-LM Conversation closed successfully")
+                } catch (e: Exception) {
+                    Log.d(TAG, "Could not call close() on conversation: ${e.message}")
+                }
+            }
         }
     }
 

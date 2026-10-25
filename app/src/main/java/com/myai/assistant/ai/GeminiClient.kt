@@ -1,5 +1,5 @@
 // File: app/src/main/java/com/myai/assistant/ai/GeminiClient.kt
-// Gemini Client — Google AI Brain (FIXED: chat history + error handling)
+// Gemini Client — Google AI Brain (Key rotation + alternating chat history + robust error handling)
 
 package com.myai.assistant.ai
 
@@ -8,7 +8,10 @@ import com.google.ai.client.generativeai.GenerativeModel
 import com.google.ai.client.generativeai.type.content
 import com.google.ai.client.generativeai.type.generationConfig
 import com.myai.assistant.BuildConfig
-import com.myai.assistant.ai.models.*
+import com.myai.assistant.ai.models.AiParsedResponse
+import com.myai.assistant.ai.models.AiResponseParser
+import com.myai.assistant.ai.models.AiSource
+import com.myai.assistant.ai.models.SYSTEM_PROMPT
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -27,27 +30,57 @@ class GeminiClient @Inject constructor() {
     // Key rotation support — multiple keys comma-separated
     private var keyList: MutableList<String> = mutableListOf()
     private var currentKeyIndex = 0
+    private var generativeModel: GenerativeModel? = null
 
-    /** Multiple Gemini keys set karo (comma-separated) */
-    fun setApiKeys(keysCommaSeparated: String) {
-        keyList = keysCommaSeparated.split(",")
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .toMutableList()
-        if (keyList.isNotEmpty()) {
-            currentKeyIndex = 0
-            apiKey = keyList[0]
-            generativeModel = null
+    init {
+        val initialKey = apiKey.trim()
+        if (initialKey.isNotEmpty()) {
+            if (initialKey.contains(",")) {
+                setApiKeys(initialKey)
+            } else {
+                keyList.clear()
+                keyList.add(initialKey)
+                currentKeyIndex = 0
+            }
         }
     }
 
-    /** Next key pe rotate karo (quota exhausted pe) */
+    /** Multiple Gemini keys set karo (comma-separated) */
+    fun setApiKeys(keysCommaSeparated: String) {
+        val parsed = keysCommaSeparated.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        if (parsed.isNotEmpty()) {
+            keyList = parsed.toMutableList()
+            currentKeyIndex = 0
+            apiKey = keyList[0]
+            generativeModel = null
+            Log.d(TAG, "Configured ${keyList.size} Gemini API keys for rotation")
+        }
+    }
+
+    /** Runtime key update */
+    fun updateApiKey(key: String) {
+        val trimmed = key.trim()
+        if (trimmed.contains(",")) {
+            setApiKeys(trimmed)
+        } else {
+            apiKey = trimmed
+            keyList = if (trimmed.isNotBlank()) mutableListOf(trimmed) else mutableListOf()
+            currentKeyIndex = 0
+            generativeModel = null
+            Log.d(TAG, "Gemini API key updated (length: ${apiKey.length})")
+        }
+    }
+
+    /** Next key pe rotate karo (quota exhausted / 429 pe) */
     private fun rotateToNextKey(): Boolean {
         if (keyList.size <= 1) return false
         currentKeyIndex = (currentKeyIndex + 1) % keyList.size
         val newKey = keyList[currentKeyIndex]
         if (newKey != apiKey) {
-            Log.w(TAG, "🔄 Rotating Gemini key to index $currentKeyIndex")
+            Log.w(TAG, "🔄 Rotating Gemini key to index $currentKeyIndex of ${keyList.size}")
             apiKey = newKey
             generativeModel = null  // Force re-init with new key
             return true
@@ -55,19 +88,26 @@ class GeminiClient @Inject constructor() {
         return false
     }
 
-    private var generativeModel: GenerativeModel? = null
+    private fun isQuotaExhausted(e: Exception): Boolean {
+        val msg = e.message?.lowercase().orEmpty()
+        return msg.contains("429") ||
+                msg.contains("resource_exhausted") ||
+                msg.contains("quota") ||
+                msg.contains("too many requests") ||
+                msg.contains("rate limit")
+    }
 
     /**
      * Gemini model initialize karo
      */
     private fun getOrCreateModel(): GenerativeModel {
         if (generativeModel == null) {
-            Log.d(TAG, "Creating model with API key length: ${apiKey.length}")
+            Log.d(TAG, "Creating Gemini GenerativeModel with key index $currentKeyIndex (len: ${apiKey.length})")
             generativeModel = GenerativeModel(
                 modelName = DEFAULT_MODEL,
                 apiKey = apiKey,
                 generationConfig = generationConfig {
-                    temperature = 0.7f
+                    temperature = 0.2f
                     topP = 0.9f
                     maxOutputTokens = 1024
                     responseMimeType = "application/json"
@@ -79,66 +119,65 @@ class GeminiClient @Inject constructor() {
     }
 
     /**
-     * AI se chat karo — FIXED version
-     * - System messages filter out (already in systemInstruction)
-     * - Alternating user/model roles ensure karo
-     * - Better error handling
+     * AI se chat karo
      */
     suspend fun chat(
         userMessage: String,
         chatHistory: List<Pair<String, String>> = emptyList()
-    ): AiParsedResponse = withContext(Dispatchers.IO) {
-        try {
-            if (apiKey.isBlank()) {
-                Log.e(TAG, "API key is blank!")
-                return@withContext AiResponseParser.errorResponse(
-                    "Gemini API key set nahi hai. Settings mein jaake daalo.",
-                    AiSource.GEMINI
-                )
-            }
+    ): AiParsedResponse = chatInternal(userMessage, chatHistory, retryAttempt = 0)
 
+    private suspend fun chatInternal(
+        userMessage: String,
+        chatHistory: List<Pair<String, String>>,
+        retryAttempt: Int
+    ): AiParsedResponse = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            Log.e(TAG, "Gemini API key is blank")
+            return@withContext AiResponseParser.errorResponse(
+                "Gemini API key set nahi hai. Settings mein jaake daalo.",
+                AiSource.GEMINI
+            )
+        }
+
+        try {
             val model = getOrCreateModel()
 
-            // ═══════════════════════════════════════
-            // FIXED: Chat history properly filter karo
-            // Gemini mein sirf "user" aur "model" roles valid hain
-            // "system" messages skip karo (already in systemInstruction)
-            // Consecutive same-role messages merge karo
-            // ═══════════════════════════════════════
+            // 1. Filter chat history: Gemini requires "user" and "model" roles only
             val filteredHistory = chatHistory
-                .filter { (role, _) -> role == "user" || role == "assistant" }
+                .filter { (role, content) ->
+                    (role == "user" || role == "assistant" || role == "model") && content.isNotBlank()
+                }
                 .map { (role, content) ->
                     val geminiRole = if (role == "user") "user" else "model"
-                    Pair(geminiRole, content)
+                    Pair(geminiRole, content.trim())
                 }
 
-            // Ensure alternating roles — merge consecutive same-role messages
+            // 2. Ensure strictly alternating roles — merge consecutive same-role messages
             val alternatingHistory = mutableListOf<Pair<String, String>>()
             for ((role, content) in filteredHistory) {
                 if (alternatingHistory.isNotEmpty() && alternatingHistory.last().first == role) {
-                    // Same role — merge with previous
                     val prev = alternatingHistory.removeAt(alternatingHistory.size - 1)
-                    alternatingHistory.add(Pair(role, "${prev.second}\n${content}"))
+                    alternatingHistory.add(Pair(role, "${prev.second}\n$content"))
                 } else {
                     alternatingHistory.add(Pair(role, content))
                 }
             }
 
-            // Gemini requires history to start with "user" role
-            val cleanHistory = if (alternatingHistory.isNotEmpty() && alternatingHistory[0].first != "user") {
+            // 3. History MUST start with "user"
+            val startWithUserHistory = if (alternatingHistory.isNotEmpty() && alternatingHistory.first().first != "user") {
                 alternatingHistory.drop(1)
             } else {
                 alternatingHistory
             }
 
-            // Also ensure history ends with "model" (not "user", because we send new user message)
-            val finalHistory = if (cleanHistory.isNotEmpty() && cleanHistory.last().first == "user") {
-                cleanHistory.dropLast(1)
+            // 4. History MUST end with "model" (because userMessage will be the next "user" turn)
+            val finalHistory = if (startWithUserHistory.isNotEmpty() && startWithUserHistory.last().first == "user") {
+                startWithUserHistory.dropLast(1)
             } else {
-                cleanHistory
+                startWithUserHistory
             }
 
-            Log.d(TAG, "Sending to Gemini — history: ${finalHistory.size} msgs, new: '$userMessage'")
+            Log.d(TAG, "Sending to Gemini ($DEFAULT_MODEL) — history: ${finalHistory.size} turns, prompt: '${userMessage.take(80)}'")
 
             // Chat session banao with cleaned history
             val chat = model.startChat(
@@ -150,30 +189,29 @@ class GeminiClient @Inject constructor() {
             )
 
             // Message bhejo
-            val response = chat.sendMessage(userMessage)
-            val responseText = response.text ?: ""
-
-            Log.d(TAG, "Gemini response: ${responseText.take(200)}")
+            val response = chat.sendMessage(userMessage.trim())
+            val responseText = response.text?.trim().orEmpty()
 
             if (responseText.isBlank()) {
+                Log.w(TAG, "Gemini returned blank response")
                 return@withContext AiResponseParser.errorResponse(
                     "Gemini se khaali response aaya",
                     AiSource.GEMINI
                 )
             }
 
-            // Parse karo
+            Log.d(TAG, "Gemini response received (${responseText.length} chars)")
             AiResponseParser.parse(responseText, AiSource.GEMINI)
 
         } catch (e: Exception) {
             Log.e(TAG, "Gemini error: ${e.message}", e)
-            // 429 = quota exhausted — try next key
-            val errMsg = e.message ?: ""
-            if ((errMsg.contains("429") || errMsg.contains("quota") || errMsg.contains("RESOURCE_EXHAUSTED"))
-                && rotateToNextKey()) {
-                Log.w(TAG, "♻️ Quota exhausted, retrying with new key...")
-                return@withContext chat(userMessage, chatHistory)  // Retry with new key
+
+            // 429 / Quota exhausted — seamless rotation & retry
+            if (isQuotaExhausted(e) && retryAttempt < (keyList.size - 1) && rotateToNextKey()) {
+                Log.w(TAG, "♻️ Quota exhausted, retrying with rotated key (attempt ${retryAttempt + 1})...")
+                return@withContext chatInternal(userMessage, chatHistory, retryAttempt + 1)
             }
+
             AiResponseParser.errorResponse(
                 "Gemini error: ${e.message}",
                 AiSource.GEMINI
@@ -186,16 +224,6 @@ class GeminiClient @Inject constructor() {
      */
     fun isAvailable(): Boolean {
         val available = apiKey.isNotBlank()
-        Log.d(TAG, "isAvailable: $available (key length: ${apiKey.length})")
         return available
-    }
-
-    /**
-     * API key update karo (runtime pe)
-     */
-    fun updateApiKey(key: String) {
-        apiKey = key
-        generativeModel = null  // Re-initialize next call pe
-        Log.d(TAG, "API key updated, model reset")
     }
 }

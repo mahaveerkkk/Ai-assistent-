@@ -86,34 +86,34 @@ class OllamaClient @Inject constructor() {
                 .post(jsonBody.toRequestBody("application/json".toMediaType()))
                 .build()
 
-            val response = httpClient.newCall(httpRequest).execute()
+            httpClient.newCall(httpRequest).execute().use { response ->
+                if (!response.isSuccessful) {
+                    val errorBody = response.body?.string() ?: "Unknown error"
+                    Log.e(TAG, "HTTP Error ${response.code}: $errorBody")
+                    return@withContext AiResponseParser.errorResponse(
+                        "Ollama error (${response.code}): $errorBody",
+                        AiSource.OLLAMA
+                    )
+                }
 
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string() ?: "Unknown error"
-                Log.e(TAG, "HTTP Error ${response.code}: $errorBody")
-                return@withContext AiResponseParser.errorResponse(
-                    "Ollama error (${response.code}): $errorBody",
-                    AiSource.OLLAMA
-                )
+                // Response parse karo
+                val responseBody = response.body?.string() ?: ""
+                Log.d(TAG, "Response: ${responseBody.take(200)}")
+
+                val ollamaResponse = gson.fromJson(responseBody, OllamaResponse::class.java)
+
+                if (ollamaResponse.error != null) {
+                    return@withContext AiResponseParser.errorResponse(
+                        ollamaResponse.error,
+                        AiSource.OLLAMA
+                    )
+                }
+
+                val aiContent = ollamaResponse.message?.content ?: ""
+
+                // AI response ko parse karo (JSON extract)
+                AiResponseParser.parse(aiContent, AiSource.OLLAMA)
             }
-
-            // Response parse karo
-            val responseBody = response.body?.string() ?: ""
-            Log.d(TAG, "Response: ${responseBody.take(200)}")
-
-            val ollamaResponse = gson.fromJson(responseBody, OllamaResponse::class.java)
-
-            if (ollamaResponse.error != null) {
-                return@withContext AiResponseParser.errorResponse(
-                    ollamaResponse.error,
-                    AiSource.OLLAMA
-                )
-            }
-
-            val aiContent = ollamaResponse.message?.content ?: ""
-
-            // AI response ko parse karo (JSON extract)
-            AiResponseParser.parse(aiContent, AiSource.OLLAMA)
 
         } catch (e: IOException) {
             Log.e(TAG, "Network error: ${e.message}", e)
@@ -140,8 +140,9 @@ class OllamaClient @Inject constructor() {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            response.isSuccessful
+            httpClient.newCall(request).execute().use { response ->
+                response.isSuccessful
+            }
         } catch (e: Exception) {
             Log.w(TAG, "Server not available: ${e.message}")
             false
@@ -158,14 +159,15 @@ class OllamaClient @Inject constructor() {
                 .get()
                 .build()
 
-            val response = httpClient.newCall(request).execute()
-            if (!response.isSuccessful) return@withContext emptyList()
+            httpClient.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) return@withContext emptyList()
 
-            val body = response.body?.string() ?: return@withContext emptyList()
-            val map = gson.fromJson(body, Map::class.java)
-            val models = map["models"] as? List<Map<String, Any>> ?: return@withContext emptyList()
+                val body = response.body?.string() ?: return@withContext emptyList()
+                val map = gson.fromJson(body, Map::class.java)
+                val models = map["models"] as? List<Map<String, Any>> ?: return@withContext emptyList()
 
-            models.mapNotNull { it["name"] as? String }
+                models.mapNotNull { it["name"] as? String }
+            }
         } catch (e: Exception) {
             emptyList()
         }

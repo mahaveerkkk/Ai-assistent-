@@ -42,6 +42,7 @@ fun SettingsScreen(
     var ollamaUrl by remember { mutableStateOf(settings.ollamaUrl) }
     var ollamaModel by remember { mutableStateOf(settings.ollamaModel) }
     var geminiApiKey by remember { mutableStateOf(settings.geminiApiKey) }
+    var geminiBackupApiKey by remember { mutableStateOf(settings.geminiBackupApiKey) }
     var useOllama by remember { mutableStateOf(settings.useOllama) }
     var useGemini by remember { mutableStateOf(settings.useGemini) }
     var useLiteRt by remember { mutableStateOf(settings.useLiteRt) }
@@ -153,11 +154,19 @@ fun SettingsScreen(
 
                 if (useGemini) {
                     SettingsTextField(
-                        label = "Gemini API Key",
+                        label = "Primary Gemini API Key (Brain 1)",
                         value = geminiApiKey,
                         onChange = {
                             geminiApiKey = it
                             viewModel.setGeminiApiKey(it)
+                        }
+                    )
+                    SettingsTextField(
+                        label = "Backup Gemini API Key (Brain 2 / Failover)",
+                        value = geminiBackupApiKey,
+                        onChange = {
+                            geminiBackupApiKey = it
+                            viewModel.setGeminiBackupApiKey(it)
                         }
                     )
                 }

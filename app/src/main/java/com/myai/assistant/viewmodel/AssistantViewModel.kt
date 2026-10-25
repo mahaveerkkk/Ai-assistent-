@@ -14,20 +14,13 @@ import com.myai.assistant.data.model.ChatMessage
 import com.myai.assistant.data.model.MessageSender
 import com.myai.assistant.data.model.MessageType
 import com.myai.assistant.data.repository.ChatRepository
-import com.myai.assistant.features.contacts.ContactsHelper
-import com.myai.assistant.features.device.DeviceInfoManager
+import com.myai.assistant.data.repository.SettingsRepository
 import com.myai.assistant.features.device.AlarmHelper
-import com.myai.assistant.features.device.CalendarHelper
-import com.myai.assistant.features.device.ClipboardHelper
-import com.myai.assistant.features.camera.CameraManager
-import com.myai.assistant.features.location.LocationHelper
-import com.myai.assistant.features.media.MediaHelper
-import com.myai.assistant.features.messages.SmsHelper
 import com.myai.assistant.features.system.SystemControlManager
 import com.myai.assistant.features.voice.GeminiTTSManager
 import com.myai.assistant.features.voice.VoiceManager
-import com.myai.assistant.data.repository.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -64,9 +57,12 @@ class AssistantViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // Coroutine job tracker for continuous voice mode
+    private var continuousVoiceJob: Job? = null
+
     // Voice intent trigger from widget
     var launchVoicePending = false
-    private val _voiceIntentTrigger = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
+    private val _voiceIntentTrigger = MutableSharedFlow<Unit>(replay = 0, extraBufferCapacity = 1)
     val voiceIntentTrigger = _voiceIntentTrigger.asSharedFlow()
 
     fun triggerVoiceIntent() {
@@ -74,6 +70,9 @@ class AssistantViewModel @Inject constructor(
     }
 
     fun startListening() {
+        if (geminiTts.isSpeaking.value) {
+            geminiTts.stop()
+        }
         if (!_uiState.value.isListening) {
             voiceManager.startListening()
             _uiState.update { it.copy(isListening = true) }
@@ -95,11 +94,15 @@ class AssistantViewModel @Inject constructor(
     fun setContinuousVoiceMode(enabled: Boolean) {
         settings.continuousVoiceMode = enabled
         _continuousVoiceMode.value = enabled
+        if (!enabled) {
+            continuousVoiceJob?.cancel()
+        }
     }
 
     // Quick Actions
     var isFlashlightOn = false
         private set
+
     fun toggleFlashlight(): Boolean {
         isFlashlightOn = !isFlashlightOn
         val success = systemControl.toggleFlashlight(isFlashlightOn)
@@ -115,6 +118,7 @@ class AssistantViewModel @Inject constructor(
 
     var isDndOn = false
         private set
+
     fun toggleDnd(): Boolean {
         isDndOn = !isDndOn
         val success = systemControl.toggleDnd(if (isDndOn) "on" else "off")
@@ -126,6 +130,7 @@ class AssistantViewModel @Inject constructor(
 
     var isBluetoothOn = false
         private set
+
     fun toggleBluetooth(): Boolean {
         isBluetoothOn = !isBluetoothOn
         val success = systemControl.toggleBluetooth(isBluetoothOn)
@@ -147,7 +152,7 @@ class AssistantViewModel @Inject constructor(
         // Initialize voice settings from repository
         _uiState.update { it.copy(isVoiceEnabled = settings.voiceEnabled) }
 
-        // Messages load karo
+        // Messages load
         viewModelScope.launch {
             chatRepository.getAllMessages().collect { messages ->
                 _uiState.update { it.copy(messages = messages) }
@@ -163,7 +168,7 @@ class AssistantViewModel @Inject constructor(
             // Check AI availability — retry if offline
             checkAiAvailability()
             if (_uiState.value.aiSource == "offline") {
-                delay(2000) // Wait 2s and retry
+                delay(2000)
                 Log.d(TAG, "Retrying AI availability check...")
                 checkAiAvailability()
             }
@@ -217,10 +222,38 @@ class AssistantViewModel @Inject constructor(
             _uiState.update { it.copy(isListening = false, error = error) }
         }
 
-        // Speaking state track karo (Gemini TTS)
+        // Graceful handling of timeouts
+        voiceManager.onTimeout = {
+            if (settings.continuousVoiceMode) {
+                handleContinuousVoiceRestart()
+            } else {
+                _uiState.update { it.copy(isListening = false) }
+            }
+        }
+
+        // Speaking state tracking and continuous mode transition
         viewModelScope.launch {
+            var wasSpeaking = false
             geminiTts.isSpeaking.collect { speaking ->
                 _uiState.update { it.copy(isSpeaking = speaking) }
+                if (settings.continuousVoiceMode && wasSpeaking && !speaking) {
+                    val lastMessage = _uiState.value.messages.lastOrNull()
+                    if (lastMessage != null && lastMessage.sender == MessageSender.AI) {
+                        handleContinuousVoiceRestart()
+                    }
+                }
+                wasSpeaking = speaking
+            }
+        }
+    }
+
+    private fun handleContinuousVoiceRestart() {
+        if (!settings.continuousVoiceMode) return
+        continuousVoiceJob?.cancel()
+        continuousVoiceJob = viewModelScope.launch {
+            delay(150)
+            if (!_uiState.value.isListening && !geminiTts.isSpeaking.value) {
+                startListening()
             }
         }
     }
@@ -237,6 +270,7 @@ class AssistantViewModel @Inject constructor(
         val text = _uiState.value.inputText.trim()
         if (text.isEmpty()) return
 
+        continuousVoiceJob?.cancel()
         viewModelScope.launch {
             _uiState.update { it.copy(inputText = "") }
             chatRepository.sendUserMessage(text)
@@ -257,15 +291,14 @@ class AssistantViewModel @Inject constructor(
     fun toggleListening() {
         val currentlyListening = _uiState.value.isListening
         if (currentlyListening) {
-            voiceManager.stopListening()
-            _uiState.update { it.copy(isListening = false) }
+            stopListening()
         } else {
-            voiceManager.startListening()
-            _uiState.update { it.copy(isListening = true) }
+            startListening()
         }
     }
 
     fun stopListening() {
+        continuousVoiceJob?.cancel()
         voiceManager.stopListening()
         _uiState.update { it.copy(isListening = false) }
     }
@@ -292,8 +325,16 @@ class AssistantViewModel @Inject constructor(
     // ═══════════════════════════════════════
 
     fun setOllamaUrl(url: String) = aiClient.setOllamaUrl(url)
-    fun setOllamaModel(model: String) = aiClient.setOllamaModel(model)
-    fun setGeminiApiKey(key: String) = aiClient.setGeminiApiKey(key)
+
+    fun setGeminiApiKey(key: String) {
+        settings.geminiApiKey = key
+        aiClient.setGeminiApiKey(settings.allGeminiApiKeys)
+    }
+
+    fun setGeminiBackupApiKey(key: String) {
+        settings.geminiBackupApiKey = key
+        aiClient.setGeminiApiKey(settings.allGeminiApiKeys)
+    }
 
     fun setUseOllama(use: Boolean) { aiClient.useLocalOllama = use }
     fun setUseGemini(use: Boolean) { aiClient.useGeminiFallback = use }
@@ -387,6 +428,8 @@ class AssistantViewModel @Inject constructor(
      */
     fun stopAgent() {
         agentLoop.stop()
+        continuousVoiceJob?.cancel()
+        _uiState.update { it.copy(isAiThinking = false) }
         viewModelScope.launch {
             chatRepository.saveSystemMessage("🛑 Agent stopped")
         }
@@ -421,9 +464,9 @@ class AssistantViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
+        continuousVoiceJob?.cancel()
         agentLoop.stop()
         voiceManager.destroy()
         geminiTts.destroy()
     }
 }
-

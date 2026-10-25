@@ -1,14 +1,14 @@
 // File: app/src/main/java/com/myai/assistant/accessibility/AppAutomator.kt
-// App Automator — High-level automation for popular apps
+// App Automator — High-level automation for popular apps (WhatsApp, YouTube, etc.)
 
 package com.myai.assistant.accessibility
 
 import android.accessibilityservice.AccessibilityService
-import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.myai.assistant.features.contacts.ContactsHelper
 import kotlinx.coroutines.delay
 
 /**
@@ -19,11 +19,14 @@ class AppAutomator(
     private val service: AccessibilityService,
     private val actionPerformer: ActionPerformer
 ) {
+    private val contactsHelper = ContactsHelper()
+
     companion object {
         private const val TAG = "AppAutomator"
 
         // Popular app package names
         const val PKG_WHATSAPP = "com.whatsapp"
+        const val PKG_WHATSAPP_BUSINESS = "com.whatsapp.w4b"
         const val PKG_YOUTUBE = "com.google.android.youtube"
         const val PKG_CHROME = "com.android.chrome"
         const val PKG_INSTAGRAM = "com.instagram.android"
@@ -75,7 +78,7 @@ class AppAutomator(
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open $packageName: ${e.message}")
+            Log.e(TAG, "Failed to open $packageName: ${e.message}", e)
             false
         }
     }
@@ -86,7 +89,8 @@ class AppAutomator(
     private fun resolvePackageName(appName: String): String? {
         val lower = appName.lowercase().trim()
         return when {
-            lower.containsAny("whatsapp", "whats app", "wp") -> PKG_WHATSAPP
+            lower.containsAny("whatsapp business", "wa business") -> PKG_WHATSAPP_BUSINESS
+            lower.containsAny("whatsapp", "whats app", "wp", "wa") -> PKG_WHATSAPP
             lower.containsAny("youtube", "yt") -> PKG_YOUTUBE
             lower.containsAny("chrome", "browser") -> PKG_CHROME
             lower.containsAny("instagram", "insta", "ig") -> PKG_INSTAGRAM
@@ -127,53 +131,148 @@ class AppAutomator(
     // ═══════════════════════════════════════════════════════
 
     /**
+     * WhatsApp Send button dhund kar click karo (Content Description + View ID)
+     * Multiple retries across view hierarchy
+     */
+    fun findAndClickWhatsAppSendButton(): Boolean {
+        val root = service.rootInActiveWindow ?: return false
+
+        // 1. Direct search by Resource ID (com.whatsapp:id/send, com.whatsapp.w4b:id/send)
+        val candidateIds = listOf(
+            "com.whatsapp:id/send",
+            "com.whatsapp.w4b:id/send",
+            "send"
+        )
+        for (id in candidateIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in nodes) {
+                if (actionPerformer.clickNode(node)) {
+                    Log.d(TAG, "Clicked WhatsApp Send button by ID: $id")
+                    return true
+                }
+            }
+        }
+
+        // 2. Direct search by Content Description
+        val sendLabels = listOf("Send", "Send message", "भेजें", "Bhejein", "Bhejo")
+        for (label in sendLabels) {
+            val nodes = root.findAccessibilityNodeInfosByText(label)
+            for (node in nodes) {
+                val desc = node.contentDescription?.toString()
+                if (desc != null && sendLabels.any { desc.contains(it, ignoreCase = true) }) {
+                    if (actionPerformer.clickNode(node)) {
+                        Log.d(TAG, "Clicked WhatsApp Send button by ContentDescription: $desc")
+                        return true
+                    }
+                }
+            }
+        }
+
+        // 3. Fallback: Search all clickable icon views near bottom right
+        return clickByContentDescription("Send")
+    }
+
+    /**
+     * Poll and automatically click WhatsApp Send button with adaptive delay
+     * Checks repeatedly every 350ms up to maxAttempts (~4.5s) to ensure the chat window is rendered
+     */
+    suspend fun autoClickSendButton(maxAttempts: Int = 12): Boolean {
+        for (attempt in 1..maxAttempts) {
+            delay(350)
+            if (findAndClickWhatsAppSendButton()) {
+                Log.d(TAG, "✅ WhatsApp Send button clicked on attempt #$attempt")
+                return true
+            }
+        }
+        Log.w(TAG, "WhatsApp Send button not found after $maxAttempts attempts")
+        return false
+    }
+
+    /**
      * WhatsApp mein kisi ko message bhejo
-     * @param contact Contact name ya number
+     * @param contact Contact name ya phone number
      * @param message Message text
      */
     suspend fun sendWhatsAppMessage(contact: String, message: String): Boolean {
         try {
-            Log.d(TAG, "WhatsApp: Sending to $contact: $message")
+            Log.d(TAG, "WhatsApp: Preparing message to '$contact': '$message'")
 
-            // WhatsApp kholo via deep link (number ho toh)
-            if (contact.matches(Regex(".*\\d{10,}.*"))) {
-                val number = contact.replace(Regex("[^0-9+]"), "")
-                val uri = Uri.parse("https://wa.me/$number?text=${Uri.encode(message)}")
+            // 1. Check if contact is a raw phone number
+            val isRawNumber = contact.matches(Regex("^[+]*[0-9 -]{7,16}$"))
+
+            // 2. If not raw number, lookup contact in device contacts
+            val foundContact = if (!isRawNumber) contactsHelper.findContact(service, contact) else null
+            val targetNumber = if (isRawNumber) contact else foundContact?.phoneNumber
+
+            // 3. If phone number is available, use fast and reliable wa.me deep link
+            if (targetNumber != null) {
+                val formattedNumber = contactsHelper.formatForWhatsApp(targetNumber)
+                Log.d(TAG, "Opening WhatsApp deep link for $formattedNumber")
+
+                val uri = Uri.parse("https://wa.me/$formattedNumber?text=${Uri.encode(message)}")
                 val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage(PKG_WHATSAPP)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 }
-                service.startActivity(intent)
-                delay(3000)
 
-                // Send button click
-                return actionPerformer.clickByContentDescription("Send")
+                try {
+                    service.startActivity(intent)
+                } catch (e: Exception) {
+                    // Try without setPackage (for WhatsApp Business or default handler)
+                    val fallbackIntent = Intent(Intent.ACTION_VIEW, uri).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    service.startActivity(fallbackIntent)
+                }
+
+                // Auto-click Send button via accessibility polling
+                return autoClickSendButton(maxAttempts = 12)
             }
 
-            // Name se contact dhundo
-            openAppByPackage(PKG_WHATSAPP)
+            // 4. Fallback: Search inside WhatsApp UI if contact number not in address book
+            Log.d(TAG, "Contact '$contact' not found in contacts, falling back to WhatsApp UI automation")
+            val opened = openAppByPackage(PKG_WHATSAPP) || openAppByPackage(PKG_WHATSAPP_BUSINESS)
+            if (!opened) return false
+
             delay(2000)
 
-            // Search icon click
-            actionPerformer.clickByContentDescription("Search")
+            // Click Search icon in WhatsApp
+            val searchClicked = actionPerformer.clickByViewId("com.whatsapp:id/menuitem_search")
+                    || actionPerformer.clickByContentDescription("Search")
+                    || actionPerformer.clickByText("Search")
+
+            if (!searchClicked) {
+                Log.w(TAG, "Could not find Search button in WhatsApp")
+            }
             delay(1000)
 
-            // Contact name type karo
+            // Type contact name in search input
             actionPerformer.typeInFirstField(contact)
             delay(2000)
 
-            // Contact pe click karo (search result)
-            actionPerformer.clickByText(contact)
+            // Click on the matching contact from search results
+            val contactClicked = actionPerformer.clickByText(contact)
+            if (!contactClicked) {
+                Log.w(TAG, "Could not find search result for '$contact' in WhatsApp")
+                return false
+            }
             delay(1500)
 
-            // Message type karo
-            actionPerformer.typeInFieldWithHint("Type a message", message)
+            // Type message in input field
+            val typed = actionPerformer.typeInFieldWithHint("Type a message", message)
+                    || actionPerformer.typeInFieldWithHint("Message", message)
+                    || actionPerformer.typeInFirstField(message)
+
+            if (!typed) {
+                Log.w(TAG, "Could not type message in WhatsApp chat")
+            }
             delay(500)
 
-            // Send button click
-            return actionPerformer.clickByContentDescription("Send")
+            // Click Send button
+            return autoClickSendButton(maxAttempts = 6)
 
         } catch (e: Exception) {
-            Log.e(TAG, "WhatsApp error: ${e.message}", e)
+            Log.e(TAG, "WhatsApp automation error: ${e.message}", e)
             return false
         }
     }
@@ -183,13 +282,12 @@ class AppAutomator(
     // ═══════════════════════════════════════════════════════
 
     /**
-     * YouTube mein kuch search karo
+     * YouTube mein search karo
      */
     suspend fun searchYouTube(query: String): Boolean {
         try {
             Log.d(TAG, "YouTube: Searching '$query'")
 
-            // YouTube kholo with search intent
             val intent = Intent(Intent.ACTION_SEARCH).apply {
                 setPackage(PKG_YOUTUBE)
                 putExtra("query", query)
@@ -200,20 +298,15 @@ class AppAutomator(
                 service.startActivity(intent)
                 true
             } catch (e: Exception) {
-                // Fallback: manually kholo aur search karo
                 openAppByPackage(PKG_YOUTUBE)
                 delay(2000)
                 actionPerformer.clickByContentDescription("Search")
                 delay(1000)
                 actionPerformer.typeInFirstField(query)
                 delay(500)
-                // Enter press equivalent
                 val root = service.rootInActiveWindow
                 val fields = ScreenReader.findEditableFields(root)
                 if (fields.isNotEmpty()) {
-                    // Enter key simulate — search submit
-                    val args = android.os.Bundle()
-                    args.putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_MOVEMENT_GRANULARITY_INT, 1)
                     fields[0].performAction(AccessibilityNodeInfo.ACTION_CLICK)
                 }
                 true
@@ -239,7 +332,7 @@ class AppAutomator(
             service.startActivity(intent)
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Browser error: ${e.message}")
+            Log.e(TAG, "Browser error: ${e.message}", e)
             false
         }
     }
@@ -262,31 +355,24 @@ class AppAutomator(
         try {
             Log.d(TAG, "Telegram: Sending to $contact: $message")
 
-            // Open Telegram
             openAppByPackage(PKG_TELEGRAM)
             delay(2000)
 
-            // Search icon click
             if (!actionPerformer.clickByContentDescription("Search")) {
                 actionPerformer.clickByText("Search")
             }
             delay(1000)
 
-            // Contact name type karo
             actionPerformer.typeInFirstField(contact)
             delay(2000)
 
-            // Contact pe click karo
             actionPerformer.clickByText(contact)
             delay(1500)
 
-            // Message type karo
             actionPerformer.typeInFirstField(message)
             delay(500)
 
-            // Send button click
             return actionPerformer.clickByContentDescription("Send") || actionPerformer.clickByText("Send")
-
         } catch (e: Exception) {
             Log.e(TAG, "Telegram error: ${e.message}", e)
             return false
@@ -304,17 +390,14 @@ class AppAutomator(
         try {
             Log.d(TAG, "Instagram: DM to $contact: $message")
 
-            // Instagram kholo
             openAppByPackage(PKG_INSTAGRAM)
             delay(2500)
 
-            // DM icon click (paper plane icon)
             if (!actionPerformer.clickByContentDescription("Direct")) {
                 actionPerformer.clickByContentDescription("Messenger")
             }
             delay(1500)
 
-            // Search mein contact dhundo
             if (!actionPerformer.clickByText("Search")) {
                 actionPerformer.clickByContentDescription("Search")
             }
@@ -323,17 +406,13 @@ class AppAutomator(
             actionPerformer.typeInFirstField(contact)
             delay(2000)
 
-            // Contact pe click
             actionPerformer.clickByText(contact)
             delay(1500)
 
-            // Message type
             actionPerformer.typeInFirstField(message)
             delay(500)
 
-            // Send
             return actionPerformer.clickByContentDescription("Send") || actionPerformer.clickByText("Send")
-
         } catch (e: Exception) {
             Log.e(TAG, "Instagram DM error: ${e.message}", e)
             return false
@@ -358,7 +437,6 @@ class AppAutomator(
             Log.d(TAG, "🗺️ Navigating to: $destination")
             true
         } catch (e: Exception) {
-            // Fallback: open Maps with search
             try {
                 val searchUri = Uri.parse("geo:0,0?q=${Uri.encode(destination)}")
                 val searchIntent = Intent(Intent.ACTION_VIEW, searchUri).apply {
@@ -367,7 +445,7 @@ class AppAutomator(
                 service.startActivity(searchIntent)
                 true
             } catch (ex: Exception) {
-                Log.e(TAG, "Maps error: ${ex.message}")
+                Log.e(TAG, "Maps error: ${ex.message}", ex)
                 false
             }
         }
@@ -390,7 +468,6 @@ class AppAutomator(
             Log.d(TAG, "🏪 Play Store: searching '$appName'")
             true
         } catch (e: Exception) {
-            // Fallback: browser-based Play Store
             openUrl("https://play.google.com/store/search?q=${Uri.encode(appName)}")
         }
     }
@@ -402,20 +479,19 @@ class AppAutomator(
     /**
      * Content description se element click karo
      */
-    private fun ActionPerformer.clickByContentDescription(desc: String): Boolean {
+    fun clickByContentDescription(desc: String): Boolean {
         val root = service.rootInActiveWindow ?: return false
         val nodes = root.findAccessibilityNodeInfosByText(desc)
         for (node in nodes) {
-            if (node.contentDescription?.toString()?.contains(desc, ignoreCase = true) == true) {
-                return clickNode(node)
+            val nodeDesc = node.contentDescription?.toString()
+            if (nodeDesc != null && nodeDesc.contains(desc, ignoreCase = true)) {
+                return actionPerformer.clickNode(node)
             }
         }
-        // Text mein bhi dhundo
-        return clickByText(desc)
+        return actionPerformer.clickByText(desc)
     }
 
     private fun String.containsAny(vararg keywords: String): Boolean {
         return keywords.any { this.contains(it) }
     }
 }
-

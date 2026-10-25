@@ -1,28 +1,46 @@
-# 🤖 MyAI Assistant — Project Context & Knowledge Base
-> **Last Updated:** 2026-07-10
-> **Purpose:** Ye file saara project context store karti hai taki baar baar poura code read na karna pare.
+# 🤖 MyAI Assistant (FRIDAY AI) — Project Context & Knowledge Base
+> **Last Updated:** 2026-10-25
+> **Purpose:** Ye file saara project context store karti hai taki baar baar poora code read na karna pare.
 
 ---
 
-## 📁 COMPLETE FILE MAP (38 Kotlin files)
+## 📁 COMPLETE FILE MAP (39+ Kotlin files)
 
 ### Root
 ```
 app/src/main/java/com/myai/assistant/
 ├── MyAIApp.kt                          — @HiltAndroidApp Application class
 ├── accessibility/
-│   ├── ActionPerformer.kt              — (281 lines) Click, type, scroll, swipe, global actions (back/home/recents)
-│   ├── AppAutomator.kt                 — (420 lines) Open apps, WhatsApp/Telegram/Instagram messaging, Maps, Play Store
-│   ├── MyAccessibilityService.kt       — (352 lines) Central hub, singleton, 35+ action dispatcher via executeAiCommand()
-│   └── ScreenReader.kt                 — (200 lines) Read screen text, UI tree structure, clickable elements
+│   ├── ActionPerformer.kt              — Click, type, scroll, swipe, global actions (back/home/recents)
+│   ├── AppAutomator.kt                 — Open apps, WhatsApp/Telegram messaging, Maps, Play Store, adaptive auto-send
+│   ├── MyAccessibilityService.kt       — Central hub, singleton, action dispatcher via executeAiCommand()
+│   └── ScreenReader.kt                 — Stack-safe iterative UI tree traversal, token pruning, coordinate bounding boxes
 ├── ai/
-│   ├── AIClient.kt                     — (204 lines) Multi-engine orchestrator: LiteRT → Ollama → Gemini → Offline fallback
-│   ├── AgentLoop.kt                    — (260 lines) Multi-step autonomous execution (10 steps max)
-│   ├── GeminiClient.kt                 — (153 lines) Google Gemini 2.0 Flash API client
-│   ├── LocalInferenceClient.kt         — (114 lines) Google LiteRT on-device AI (Gemma/Qwen models)
-│   ├── OllamaClient.kt                 — (148 lines) Local Ollama HTTP server client (LLaMA3)
+│   ├── AIClient.kt                     — Multi-engine orchestrator: LiteRT → Groq (150ms) → Gemini (Failover) → Offline
+│   ├── AgentLoop.kt                    — Multi-step autonomous execution, loop detection, screen verification
+│   ├── GeminiClient.kt                 — Google Gemini 2.0 Flash client with automatic 429 key rotation
+│   ├── GroqClient.kt                   — Ultra-fast Llama 3.3 70B client (150-200ms latency)
+│   ├── LocalInferenceClient.kt         — Google LiteRT on-device AI (Gemma/Qwen models)
+│   ├── OllamaClient.kt                 — Local Ollama HTTP server client (LLaMA3)
+│   ├── AssistantBrain.kt               — 35+ zero-latency shortcuts, direct hardware executor, voice response
 │   └── models/
-│       └── AiModels.kt                 — (280 lines) System prompt (35+ actions), JSON parser, data classes
+│       └── AiModels.kt                 — Expanded Hinglish system prompt, balanced brace robust JSON parser, AiSource
+├── features/
+│   ├── system/
+│   │   └── SystemControlManager.kt   — Real-time TorchCallback, BT API 31+ checks, WiFi panel, Volume, DND
+│   ├── voice/
+│   │   ├── GeminiTTSManager.kt       — Gemini 3.8 Live API WebSocket native audio stream (24kHz/16kHz), AudioTrack leak-free
+│   │   ├── VoiceManager.kt           — SpeechRecognizer with exclusive transient audio focus, clean state machine
+│   │   └── WakeWordDetector.kt       — Persistent recognizer, tiered error backoff cooldown, word-boundary regex
+├── overlay/
+│   ├── OverlayManager.kt            — Floating bubble with magnetic edge-snapping, scaled touch slop, 6 states
+│   └── OverlayService.kt            — Foreground service for overlay, dynamically bound to Thinking/Speaking/Listening
+├── ui/
+│   ├── components/
+│   │   └── FridayOrb.kt             — Zero-allocation Canvas draw pipeline, 60/120fps, 6 live animated holographic states
+│   └── screens/
+│       ├── ChatScreen.kt            — Full-screen Living Orb, quick action chips, imePadding, haptic feedback
+│       └── SettingsScreen.kt        — Dual Gemini keys (Primary & Backup) + Groq key settings
 ├── data/
 │   ├── db/
 │   │   ├── ChatDao.kt                  — Room DAO: getAllMessages(Flow), insert, deleteAll, getRecentMessages

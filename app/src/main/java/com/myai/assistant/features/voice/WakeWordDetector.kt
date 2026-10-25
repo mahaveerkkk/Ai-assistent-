@@ -1,11 +1,13 @@
 // File: app/src/main/java/com/myai/assistant/features/voice/WakeWordDetector.kt
-// Wake Word Detector — "Hey Assistant" / "Suno" background detection
+// Wake Word Detector — "Hey Assistant" / "Friday" / "Suno" background detection
 
 package com.myai.assistant.features.voice
 
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -17,19 +19,18 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Wake Word Detector — Background mein continuously listen kare
+ * Wake Word Detector — Continuous low-CPU background listening engine
  *
  * Supported wake words:
- * - "Hey Assistant"
- * - "Suno"
- * - "OK Assistant"
- * - "Hello Assistant"
+ * - "Friday", "Hey Friday", "OK Friday", "Hello Friday"
+ * - "Hey Assistant", "Hello Assistant", "OK Assistant", "Assistant"
+ * - "Suno", "Suno Assistant", "Hey AI", "OK AI"
  *
- * Flow:
- * 1. SpeechRecognizer loop mein chale
- * 2. Result mein wakeword check karo
- * 3. Wakeword mila → onWakeWordDetected callback fire karo
- * 4. Caller full listening mode ON kare
+ * Key Optimizations:
+ * 1. Persistent SpeechRecognizer instance — avoids creating/destroying binder proxies every cycle
+ * 2. Tiered backoff cooldown on errors — prevents 100% CPU spinning when microphone is contested
+ * 3. Exact word-boundary regex matching — eliminates false positives (e.g. "Sunday" matching "sun")
+ * 4. Safe mainHandler lifecycle — pause() and stop() cancel all pending execution immediately
  */
 @Singleton
 class WakeWordDetector @Inject constructor() {
@@ -37,25 +38,25 @@ class WakeWordDetector @Inject constructor() {
     companion object {
         private const val TAG = "WakeWord"
 
-        // Wake word list — lowercase mein match hoga
-        private val WAKE_WORDS = listOf(
-            "friday",
-            "hey friday",
-            "ok friday",
-            "hello friday",
-            "hey assistant",
-            "hello assistant",
-            "ok assistant",
-            "suno",
-            "sun",
-            "suno assistant",
-            "assistant",
-            "hey ai",
-            "ok ai"
-        )
+        // Default restart delay after clean cycle (ms)
+        private const val NORMAL_RESTART_DELAY_MS = 350L
 
-        // Restart delay after each recognition cycle (ms)
-        private const val RESTART_DELAY_MS = 300L
+        // Regex patterns with word boundaries to eliminate false positives
+        private val WAKE_PATTERNS = listOf(
+            Regex("\\bfriday\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bhey\\s+friday\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bok\\s+friday\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bhello\\s+friday\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bhey\\s+assistant\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bhello\\s+assistant\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bok\\s+assistant\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bassistant\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bsuno\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bsuno\\s+assistant\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bsun\\s+na\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bhey\\s+ai\\b", RegexOption.IGNORE_CASE),
+            Regex("\\bok\\s+ai\\b", RegexOption.IGNORE_CASE)
+        )
     }
 
     // ═══════════════════════════════════════
@@ -69,30 +70,33 @@ class WakeWordDetector @Inject constructor() {
     val isDetecting: StateFlow<Boolean> = _isDetecting.asStateFlow()
 
     private var speechRecognizer: SpeechRecognizer? = null
+    @Volatile
     private var isLooping = false
     private var context: Context? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingRestartRunnable: Runnable? = null
+
+    // Error cooldown & backoff management
+    private var consecutiveErrorCount = 0
 
     // Callbacks
     var onWakeWordDetected: ((detectedWord: String) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
     // ═══════════════════════════════════════
-    // START / STOP
+    // START / STOP / PAUSE / RESUME
     // ═══════════════════════════════════════
 
-    /**
-     * Wakeword detection START karo
-     * Background mein continuous loop chalega
-     */
     fun start(context: Context) {
+        val appContext = context.applicationContext
+        this.context = appContext
+
         if (_isActive.value) {
             Log.d(TAG, "Already active, skipping start")
             return
         }
 
-        this.context = context
-
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+        if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
             Log.e(TAG, "❌ Speech recognition not available on this device")
             onError?.invoke("Speech recognition available nahi hai")
             return
@@ -100,101 +104,129 @@ class WakeWordDetector @Inject constructor() {
 
         _isActive.value = true
         isLooping = true
+        consecutiveErrorCount = 0
         Log.d(TAG, "🎤 Wake word detection STARTED")
 
-        startListeningLoop()
+        mainHandler.post {
+            ensureRecognizerReady()
+            startListeningCycle()
+        }
     }
 
-    /**
-     * Wakeword detection STOP karo
-     */
     fun stop() {
         isLooping = false
         _isActive.value = false
         _isDetecting.value = false
+        cancelPendingRestarts()
 
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-            speechRecognizer?.destroy()
-            speechRecognizer = null
-        } catch (_: Exception) {}
-
-        Log.d(TAG, "🛑 Wake word detection STOPPED")
+        mainHandler.post {
+            destroyRecognizer()
+            Log.d(TAG, "🛑 Wake word detection STOPPED")
+        }
     }
 
-    /**
-     * Temporarily pause karo (jab main listening chal rahi ho)
-     */
     fun pause() {
         if (!_isActive.value) return
         isLooping = false
         _isDetecting.value = false
-        try {
-            speechRecognizer?.stopListening()
-            speechRecognizer?.cancel()
-        } catch (_: Exception) {}
-        Log.d(TAG, "⏸️ Wake word PAUSED")
+        cancelPendingRestarts()
+
+        mainHandler.post {
+            try {
+                speechRecognizer?.cancel()
+            } catch (_: Exception) {}
+            Log.d(TAG, "⏸️ Wake word PAUSED")
+        }
     }
 
-    /**
-     * Resume karo (jab main listening khatam ho)
-     */
     fun resume() {
         if (!_isActive.value) return
+        cancelPendingRestarts()
         isLooping = true
+        consecutiveErrorCount = 0
         Log.d(TAG, "▶️ Wake word RESUMED")
-        startListeningLoop()
+
+        mainHandler.post {
+            ensureRecognizerReady()
+            scheduleRestart(NORMAL_RESTART_DELAY_MS)
+        }
     }
 
     // ═══════════════════════════════════════
-    // RECOGNITION LOOP
+    // INTERNAL RECOGNIZER LIFECYCLE
     // ═══════════════════════════════════════
 
-    private fun startListeningLoop() {
+    private fun ensureRecognizerReady() {
         val ctx = context ?: return
-        if (!isLooping) return
+        if (speechRecognizer != null) return
 
         try {
-            // Purana recognizer clean karo
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(ctx).apply {
+                setRecognitionListener(createWakeWordListener())
+            }
+            Log.d(TAG, "SpeechRecognizer instance created for wake word")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create SpeechRecognizer for wake word: ${e.message}")
+            speechRecognizer = null
+        }
+    }
+
+    private fun destroyRecognizer() {
+        try {
+            speechRecognizer?.cancel()
             speechRecognizer?.destroy()
+        } catch (_: Exception) {}
+        speechRecognizer = null
+    }
 
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(ctx)
-            speechRecognizer?.setRecognitionListener(createWakeWordListener())
+    private fun cancelPendingRestarts() {
+        pendingRestartRunnable?.let {
+            mainHandler.removeCallbacks(it)
+            pendingRestartRunnable = null
+        }
+        mainHandler.removeCallbacksAndMessages(null)
+    }
 
+    // ═══════════════════════════════════════
+    // RECOGNITION CYCLE
+    // ═══════════════════════════════════════
+
+    private fun startListeningCycle() {
+        if (!isLooping || !_isActive.value) return
+        val ctx = context ?: return
+
+        ensureRecognizerReady()
+        val recognizer = speechRecognizer
+        if (recognizer == null) {
+            scheduleBackoffRestart()
+            return
+        }
+
+        try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                putExtra(
-                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "hi-IN")
-                putExtra(
-                    RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, false
-                )
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
-                // Short timeout for wakeword — quick cycle
-                putExtra(
-                    RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500
-                )
+                // Short minimum length for wake word quick cycling
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 1500L)
             }
 
-            speechRecognizer?.startListening(intent)
+            recognizer.startListening(intent)
             _isDetecting.value = true
-
         } catch (e: Exception) {
-            Log.e(TAG, "Recognition loop error: ${e.message}")
+            Log.w(TAG, "Failed to start listening cycle: ${e.message}, scheduling backoff")
             _isDetecting.value = false
-            // Retry after delay
-            scheduleRestart()
+            destroyRecognizer()
+            scheduleBackoffRestart()
         }
     }
 
     private fun createWakeWordListener(): RecognitionListener {
         return object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
-                Log.v(TAG, "🎤 Listening for wake word...")
+                consecutiveErrorCount = 0 // Recognizer active and ready
             }
 
             override fun onBeginningOfSpeech() {}
@@ -207,48 +239,52 @@ class WakeWordDetector @Inject constructor() {
 
             override fun onError(error: Int) {
                 _isDetecting.value = false
+
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                        // Normal — kuch nahi bola, restart karo
-                        scheduleRestart()
+                        // Normal silence cycle — restart quickly
+                        consecutiveErrorCount = 0
+                        scheduleRestart(NORMAL_RESTART_DELAY_MS)
                     }
                     SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> {
-                        // Thodi der mein retry
-                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                            scheduleRestart()
-                        }, 1000)
+                        Log.w(TAG, "Recognizer busy ($error), recreating instance")
+                        destroyRecognizer()
+                        scheduleBackoffRestart()
                     }
                     SpeechRecognizer.ERROR_AUDIO -> {
-                        Log.w(TAG, "Audio error, restarting...")
-                        scheduleRestart()
+                        Log.w(TAG, "Mic temporarily contested or audio error ($error), applying cooldown")
+                        destroyRecognizer()
+                        scheduleBackoffRestart()
+                    }
+                    SpeechRecognizer.ERROR_CLIENT -> {
+                        // Client cancel / pause
+                        if (isLooping) {
+                            scheduleRestart(NORMAL_RESTART_DELAY_MS)
+                        }
                     }
                     else -> {
-                        Log.w(TAG, "Recognition error: $error")
-                        scheduleRestart()
+                        Log.w(TAG, "WakeWord recognition error ($error), applying cooldown")
+                        scheduleBackoffRestart()
                     }
                 }
             }
 
             override fun onResults(results: Bundle?) {
                 _isDetecting.value = false
-                val matches = results?.getStringArrayList(
-                    SpeechRecognizer.RESULTS_RECOGNITION
-                ) ?: emptyList()
+                consecutiveErrorCount = 0
 
-                // Check for wake word in results
-                checkForWakeWord(matches)
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: emptyList()
+                val detected = checkForWakeWord(matches)
 
-                // Continue loop
-                scheduleRestart()
+                if (!detected && isLooping) {
+                    scheduleRestart(NORMAL_RESTART_DELAY_MS)
+                }
             }
 
             override fun onPartialResults(partialResults: Bundle?) {
-                val matches = partialResults?.getStringArrayList(
-                    SpeechRecognizer.RESULTS_RECOGNITION
-                ) ?: emptyList()
-
-                // Partial mein bhi check karo — faster response
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION) ?: emptyList()
+                // Fast-path detection on partial stream for immediate response
                 checkForWakeWord(matches)
             }
 
@@ -257,42 +293,57 @@ class WakeWordDetector @Inject constructor() {
     }
 
     // ═══════════════════════════════════════
-    // WAKE WORD CHECK
+    // WAKE WORD MATCHING
     // ═══════════════════════════════════════
 
-    /**
-     * Results mein wake word dhundo
-     */
-    private fun checkForWakeWord(results: List<String>) {
-        for (result in results) {
-            val lower = result.lowercase().trim()
-            for (wakeWord in WAKE_WORDS) {
-                if (lower.contains(wakeWord)) {
-                    Log.d(TAG, "🎯 WAKE WORD DETECTED: \"$result\" (matched: \"$wakeWord\")")
+    private fun checkForWakeWord(results: List<String>): Boolean {
+        if (!isLooping) return false
 
-                    // Detection ke baad loop pause karo (main listening start hogi)
+        for (result in results) {
+            val trimmed = result.trim()
+            for (pattern in WAKE_PATTERNS) {
+                if (pattern.containsMatchIn(trimmed)) {
+                    Log.d(TAG, "🎯 WAKE WORD DETECTED: \"$trimmed\" (pattern: ${pattern.pattern})")
+
+                    // Immediately pause detection loop to surrender microphone
                     pause()
 
-                    // Callback fire karo
-                    onWakeWordDetected?.invoke(result)
-                    return
+                    // Fire callback
+                    onWakeWordDetected?.invoke(trimmed)
+                    return true
                 }
             }
         }
+        return false
     }
 
     // ═══════════════════════════════════════
-    // RESTART SCHEDULING
+    // RESTART & BACKOFF SCHEDULING
     // ═══════════════════════════════════════
 
-    private fun scheduleRestart() {
-        if (!isLooping) return
+    private fun scheduleRestart(delayMs: Long) {
+        if (!isLooping || !_isActive.value) return
 
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-            if (isLooping) {
-                startListeningLoop()
+        cancelPendingRestarts()
+        val runnable = Runnable {
+            if (isLooping && _isActive.value) {
+                startListeningCycle()
             }
-        }, RESTART_DELAY_MS)
+        }
+        pendingRestartRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun scheduleBackoffRestart() {
+        consecutiveErrorCount++
+        // Tiered exponential backoff: 1s -> 2s -> 5s max
+        val backoffMs = when {
+            consecutiveErrorCount <= 1 -> 1000L
+            consecutiveErrorCount == 2 -> 2000L
+            else -> 5000L
+        }
+        Log.d(TAG, "Applying error cooldown: ${backoffMs}ms (consecutive errors: $consecutiveErrorCount)")
+        scheduleRestart(backoffMs)
     }
 
     // ═══════════════════════════════════════
@@ -304,6 +355,6 @@ class WakeWordDetector @Inject constructor() {
         context = null
         onWakeWordDetected = null
         onError = null
-        Log.d(TAG, "WakeWordDetector destroyed")
+        Log.d(TAG, "WakeWordDetector destroyed cleanly")
     }
 }

@@ -4,10 +4,13 @@
 package com.myai.assistant.ui.screens
 
 import androidx.compose.animation.*
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -24,8 +27,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -35,6 +40,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -69,24 +75,6 @@ fun ChatScreen(
         uiState.messages.lastOrNull { it.actionType != null && !it.isLoading }?.actionType
     }
 
-    // Continuous voice mode state tracking
-    var wasSpeaking by remember { mutableStateOf(false) }
-    LaunchedEffect(uiState.isSpeaking) {
-        if (continuousVoiceMode) {
-            val isSpeaking = uiState.isSpeaking
-            if (wasSpeaking && !isSpeaking) {
-                val lastMessage = uiState.messages.lastOrNull()
-                if (lastMessage != null && lastMessage.sender == MessageSender.AI) {
-                    kotlinx.coroutines.delay(500)
-                    if (!uiState.isListening) {
-                        viewModel.toggleListening()
-                    }
-                }
-            }
-            wasSpeaking = isSpeaking
-        }
-    }
-
     // Listening to cold start and new intents from widget
     LaunchedEffect(Unit) {
         if (viewModel.launchVoicePending) {
@@ -114,6 +102,7 @@ fun ChatScreen(
 
     Scaffold(
         containerColor = Color(0xFF0A0E1A), // Sleek deep space black
+        contentWindowInsets = WindowInsets.statusBars,
         // ═══════════════════════════════════════
         // TOP BAR
         // ═══════════════════════════════════════
@@ -122,9 +111,15 @@ fun ChatScreen(
                 isAiThinking = uiState.isAiThinking,
                 isVoiceEnabled = uiState.isVoiceEnabled,
                 isContinuousVoiceEnabled = continuousVoiceMode,
-                onToggleContinuousVoice = { viewModel.setContinuousVoiceMode(!continuousVoiceMode) },
+                onToggleContinuousVoice = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.setContinuousVoiceMode(!continuousVoiceMode)
+                },
                 aiSource = uiState.aiSource,
-                onToggleVoice = { viewModel.toggleVoiceOutput() },
+                onToggleVoice = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    viewModel.toggleVoiceOutput()
+                },
                 showMenu = showMenu,
                 onMenuToggle = { showMenu = !showMenu },
                 onClearChat = {
@@ -140,7 +135,10 @@ fun ChatScreen(
                     showDiagnosticsDialog = true
                 },
                 showChatHistory = showChatHistory,
-                onToggleChatHistory = { showChatHistory = !showChatHistory }
+                onToggleChatHistory = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    showChatHistory = !showChatHistory
+                }
             )
         }
     ) { paddingValues ->
@@ -148,6 +146,7 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
+                .imePadding() // Ensures whole chat UI moves smoothly above software keyboard
         ) {
             // Sci-fi corner brackets HUD background decoration
             HudCornerBrackets(modifier = Modifier.fillMaxSize())
@@ -155,174 +154,378 @@ fun ChatScreen(
             Column(
                 modifier = Modifier.fillMaxSize()
             ) {
-                if (!showChatHistory) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
                     // ═══════════════════════════════════════
                     // 🤖 FRIDAY HOME MODE (Living Orb + Status)
                     // ═══════════════════════════════════════
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        contentAlignment = Alignment.Center
+                    AnimatedVisibility(
+                        visible = !showChatHistory,
+                        enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
+                                scaleIn(initialScale = 0.92f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
+                        exit = fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing)) +
+                               scaleOut(targetScale = 0.92f, animationSpec = tween(350, easing = FastOutSlowInEasing)),
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center,
-                            modifier = Modifier.fillMaxSize()
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            // Immersive glowing Friday logo
-                            Text(
-                                text = "F.R.I.D.A.Y. SYSTEM",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF00F0FF).copy(alpha = 0.8f),
-                                letterSpacing = 4.sp,
-                                modifier = Modifier.padding(bottom = 12.dp)
-                            )
-
-                            // Main Interactive Orb
-                            FridayOrb(
-                                isListening = uiState.isListening,
-                                isAiThinking = uiState.isAiThinking,
-                                isSpeaking = uiState.isSpeaking,
-                                lastAction = lastAction,
-                                modifier = Modifier.size(280.dp)
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            // Interactive Status Label
-                            Text(
-                                text = when {
-                                    uiState.isListening -> "Listening..."
-                                    uiState.isAiThinking -> "Thinking..."
-                                    uiState.isSpeaking -> "Speaking..."
-                                    else -> "Friday is online. Say 'Hey Friday'"
-                                },
-                                style = MaterialTheme.typography.headlineSmall,
-                                fontWeight = FontWeight.Medium,
-                                color = when {
-                                    uiState.isListening -> Color(0xFF00F0FF)
-                                    uiState.isAiThinking -> Color(0xFFD000FF)
-                                    uiState.isSpeaking -> Color(0xFF00FF88)
-                                    else -> Color.White
-                                }
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // Action / Response details pill
-                            val responseText = uiState.messages.lastOrNull { it.sender == MessageSender.AI && !it.isLoading }?.content ?: ""
-                            if (responseText.isNotBlank()) {
-                                Surface(
-                                    color = Color(0xFF111827).copy(alpha = 0.6f),
-                                    shape = RoundedCornerShape(16.dp),
-                                    border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.2f)),
-                                    modifier = Modifier.padding(horizontal = 32.dp, vertical = 8.dp)
-                                ) {
-                                    Text(
-                                        text = responseText.take(120) + if (responseText.length > 120) "..." else "",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = Color.White.copy(alpha = 0.8f),
-                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                                        maxLines = 3
-                                    )
-                                }
-                            }
-                        }
-
-                        // Sliding Holographic Action Card
-                        AnimatedVisibility(
-                            visible = lastAction != null && (uiState.isSpeaking || uiState.isAiThinking),
-                            enter = slideInVertically { it } + fadeIn(),
-                            exit = slideOutVertically { it } + fadeOut(),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 16.dp)
-                        ) {
-                            Surface(
-                                color = Color(0xFF111827).copy(alpha = 0.8f),
-                                shape = RoundedCornerShape(20.dp),
-                                border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.4f)),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 24.dp)
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxSize()
                             ) {
+                                // Immersive glowing Friday logo
+                                Text(
+                                    text = "F.R.I.D.A.Y. SYSTEM",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF00F0FF).copy(alpha = 0.85f),
+                                    letterSpacing = 4.sp,
+                                    modifier = Modifier.padding(bottom = 12.dp)
+                                )
+
+                                // Extract state flags
+                                val lastMessage = uiState.messages.lastOrNull()
+                                val isErrorState = lastMessage?.isError == true ||
+                                        lastMessage?.messageType == com.myai.assistant.data.model.MessageType.ERROR
+                                val isSuccessState = lastMessage != null &&
+                                        lastMessage.sender == MessageSender.AI &&
+                                        lastMessage.actionType != null &&
+                                        !lastMessage.isLoading &&
+                                        !lastMessage.isError
+
+                                // Main Interactive Orb (Tap directly to speak)
+                                FridayOrb(
+                                    isListening = uiState.isListening,
+                                    isAiThinking = uiState.isAiThinking,
+                                    isSpeaking = uiState.isSpeaking,
+                                    lastAction = lastAction,
+                                    isError = isErrorState,
+                                    isSuccess = isSuccessState,
+                                    modifier = Modifier
+                                        .size(280.dp)
+                                        .clip(CircleShape)
+                                        .clickable(
+                                            indication = null,
+                                            interactionSource = remember { MutableInteractionSource() }
+                                        ) {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.toggleListening()
+                                        }
+                                )
+
+                                Spacer(modifier = Modifier.height(16.dp))
+
+                                // Interactive Status Label
+                                Text(
+                                    text = when {
+                                        uiState.isListening -> "Listening..."
+                                        uiState.isAiThinking -> "Thinking..."
+                                        uiState.isSpeaking -> "Speaking..."
+                                        else -> "Tap Orb or Say 'Hey Friday'"
+                                    },
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = when {
+                                        uiState.isListening -> Color(0xFF00F0FF)
+                                        uiState.isAiThinking -> Color(0xFFD000FF)
+                                        uiState.isSpeaking -> Color(0xFF00FF88)
+                                        else -> Color.White
+                                    }
+                                )
+
+                                Spacer(modifier = Modifier.height(12.dp))
+
+                                // Sleek quick action chips (Torch, WhatsApp, Alarm)
                                 Row(
-                                    modifier = Modifier.padding(16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(40.dp)
-                                            .background(
-                                                color = Color(0xFF00F0FF).copy(alpha = 0.15f),
-                                                shape = CircleShape
-                                            ),
-                                        contentAlignment = Alignment.Center
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = Color(0xFF111827).copy(alpha = 0.7f),
+                                        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.3f)),
+                                        modifier = Modifier.clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.updateInputText("torch on")
+                                            viewModel.sendMessage()
+                                        }
                                     ) {
-                                        Icon(
-                                            imageVector = when (lastAction?.uppercase()) {
-                                                "CALL" -> Icons.Default.Phone
-                                                "SMS", "WHATSAPP_MSG" -> Icons.Default.Message
-                                                "YOUTUBE_SEARCH" -> Icons.Default.PlayArrow
-                                                "SET_ALARM", "SET_TIMER" -> Icons.Default.Alarm
-                                                else -> Icons.Default.AutoAwesome
-                                            },
-                                            contentDescription = null,
-                                            tint = Color(0xFF00F0FF)
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.FlashlightOn,
+                                                "Torch",
+                                                tint = Color(0xFFFFD600),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("Torch", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = Color(0xFF111827).copy(alpha = 0.7f),
+                                        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.3f)),
+                                        modifier = Modifier.clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.updateInputText("whatsapp kholo")
+                                            viewModel.sendMessage()
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Message,
+                                                "WhatsApp",
+                                                tint = Color(0xFF25D366),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("WhatsApp", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+
+                                    Surface(
+                                        shape = RoundedCornerShape(20.dp),
+                                        color = Color(0xFF111827).copy(alpha = 0.7f),
+                                        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.3f)),
+                                        modifier = Modifier.clickable {
+                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            viewModel.updateInputText("alarm 7 am")
+                                            viewModel.sendMessage()
+                                        }
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Alarm,
+                                                "Alarm",
+                                                tint = Color(0xFFFF9500),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                            Text("Alarm", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                        }
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                // Action / Response details pill
+                                val responseText = uiState.messages.lastOrNull { it.sender == MessageSender.AI && !it.isLoading }?.content ?: ""
+                                if (responseText.isNotBlank()) {
+                                    Surface(
+                                        color = Color(0xFF111827).copy(alpha = 0.6f),
+                                        shape = RoundedCornerShape(16.dp),
+                                        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.2f)),
+                                        modifier = Modifier
+                                            .padding(horizontal = 32.dp, vertical = 8.dp)
+                                            .neonShadow(color = Color(0xFF00F0FF).copy(alpha = 0.3f), borderRadius = 16.dp, glowRadius = 8.dp)
+                                    ) {
+                                        Text(
+                                            text = responseText.take(120) + if (responseText.length > 120) "..." else "",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = Color.White.copy(alpha = 0.8f),
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                            maxLines = 3
                                         )
                                     }
-                                    Spacer(modifier = Modifier.width(16.dp))
-                                    Column {
-                                        Text(
-                                            text = "Executing Task",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color(0xFF00F0FF),
-                                            fontWeight = FontWeight.Bold
-                                        )
-                                        Text(
-                                            text = when (lastAction?.uppercase()) {
-                                                "CALL" -> "Placing call..."
-                                                "SMS" -> "Sending SMS..."
-                                                "WHATSAPP_MSG" -> "Opening WhatsApp..."
-                                                "YOUTUBE_SEARCH" -> "Searching YouTube..."
-                                                "SET_ALARM" -> "Setting system alarm..."
-                                                else -> "Triggering action: $lastAction"
+                                }
+                            }
+
+                            // Extract state flags for Action Card
+                            val lastMessageForCard = uiState.messages.lastOrNull()
+                            val isErrorStateForCard = lastMessageForCard?.isError == true ||
+                                    lastMessageForCard?.messageType == com.myai.assistant.data.model.MessageType.ERROR
+                            val isSuccessStateForCard = lastMessageForCard != null &&
+                                    lastMessageForCard.sender == MessageSender.AI &&
+                                    lastMessageForCard.actionType != null &&
+                                    !lastMessageForCard.isLoading &&
+                                    !lastMessageForCard.isError
+                            val isExecuting = uiState.isSpeaking || uiState.isAiThinking || (lastMessageForCard?.isLoading == true)
+
+                            // Sliding Holographic Action Card
+                            AnimatedVisibility(
+                                visible = lastAction != null && (isExecuting || isSuccessStateForCard || isErrorStateForCard),
+                                enter = slideInVertically { it } + fadeIn(),
+                                exit = slideOutVertically { it } + fadeOut(),
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 16.dp)
+                            ) {
+                                Surface(
+                                    color = Color(0xFF111827).copy(alpha = 0.65f),
+                                    shape = RoundedCornerShape(20.dp),
+                                    border = BorderStroke(
+                                        width = 1.dp,
+                                        color = when {
+                                            isErrorStateForCard -> Color(0xFFFF3B30).copy(alpha = 0.5f)
+                                            isSuccessStateForCard -> Color(0xFF00FF88).copy(alpha = 0.5f)
+                                            else -> Color(0xFF00F0FF).copy(alpha = 0.4f)
+                                        }
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 24.dp)
+                                        .neonShadow(
+                                            color = when {
+                                                isErrorStateForCard -> Color(0xFFFF3B30).copy(alpha = 0.4f)
+                                                isSuccessStateForCard -> Color(0xFF00FF88).copy(alpha = 0.4f)
+                                                else -> Color(0xFF00F0FF).copy(alpha = 0.5f)
                                             },
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = Color.White
+                                            borderRadius = 20.dp,
+                                            glowRadius = 12.dp
                                         )
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(16.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Left Side: Status Icon
+                                        Box(
+                                            modifier = Modifier
+                                                .size(40.dp)
+                                                .background(
+                                                    color = when {
+                                                        isErrorStateForCard -> Color(0xFFFF3B30).copy(alpha = 0.15f)
+                                                        isSuccessStateForCard -> Color(0xFF00FF88).copy(alpha = 0.15f)
+                                                        else -> Color(0xFF00F0FF).copy(alpha = 0.15f)
+                                                    },
+                                                    shape = CircleShape
+                                                ),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = when {
+                                                    isErrorStateForCard -> Icons.Default.Warning
+                                                    isSuccessStateForCard -> Icons.Default.CheckCircle
+                                                    else -> when (lastAction?.uppercase()) {
+                                                        "CALL" -> Icons.Default.Phone
+                                                        "SMS", "WHATSAPP_MSG" -> Icons.Default.Message
+                                                        "YOUTUBE_SEARCH" -> Icons.Default.PlayArrow
+                                                        "SET_ALARM", "SET_TIMER" -> Icons.Default.Alarm
+                                                        else -> Icons.Default.AutoAwesome
+                                                    }
+                                                },
+                                                contentDescription = null,
+                                                tint = when {
+                                                    isErrorStateForCard -> Color(0xFFFF3B30)
+                                                    isSuccessStateForCard -> Color(0xFF00FF88)
+                                                    else -> Color(0xFF00F0FF)
+                                                }
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(16.dp))
+
+                                        // Middle Side: Text status
+                                        Column(
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = when {
+                                                    isErrorStateForCard -> "Task Failed"
+                                                    isSuccessStateForCard -> "Task Completed"
+                                                    else -> "Executing Task"
+                                                },
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = when {
+                                                    isErrorStateForCard -> Color(0xFFFF3B30)
+                                                    isSuccessStateForCard -> Color(0xFF00FF88)
+                                                    else -> Color(0xFF00F0FF)
+                                                },
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                            Text(
+                                                text = when (lastAction?.uppercase()) {
+                                                    "CALL" -> "Placing call..."
+                                                    "SMS" -> "Sending SMS..."
+                                                    "WHATSAPP_MSG" -> "Opening WhatsApp..."
+                                                    "YOUTUBE_SEARCH" -> "Searching YouTube..."
+                                                    "SET_ALARM" -> "Setting system alarm..."
+                                                    else -> "Triggering action: $lastAction"
+                                                },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = Color.White
+                                            )
+                                        }
+
+                                        Spacer(modifier = Modifier.width(8.dp))
+
+                                        // Right Side: Progress Indicator or Cancel button
+                                        if (isExecuting) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    modifier = Modifier.size(18.dp),
+                                                    color = Color(0xFF00F0FF),
+                                                    strokeWidth = 2.dp
+                                                )
+                                                TextButton(
+                                                    onClick = { viewModel.stopAgent() },
+                                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        "Cancel",
+                                                        color = Color(0xFFFF3B30),
+                                                        fontSize = 12.sp,
+                                                        fontWeight = FontWeight.Bold
+                                                    )
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                } else {
+
                     // ═══════════════════════════════════════
                     // 💬 CHAT LOG MODE
                     // ═══════════════════════════════════════
-                    LazyColumn(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxWidth(),
-                        state = listState,
-                        contentPadding = PaddingValues(vertical = 8.dp)
+                    AnimatedVisibility(
+                        visible = showChatHistory,
+                        enter = fadeIn(animationSpec = tween(400, easing = FastOutSlowInEasing)) +
+                                scaleIn(initialScale = 1.08f, animationSpec = tween(400, easing = FastOutSlowInEasing)),
+                        exit = fadeOut(animationSpec = tween(350, easing = FastOutSlowInEasing)) +
+                               scaleOut(targetScale = 1.08f, animationSpec = tween(350, easing = FastOutSlowInEasing)),
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        items(
-                            items = uiState.messages.filter { !it.isLoading },
-                            key = { it.id }
-                        ) { message ->
-                            MessageBubble(
-                                message = message,
-                                modifier = Modifier.animateItem()
-                            )
-                        }
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            state = listState,
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            items(
+                                items = uiState.messages.filter { !it.isLoading },
+                                key = { it.id }
+                            ) { message ->
+                                MessageBubble(
+                                    message = message,
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
 
-                        // Typing indicator
-                        if (uiState.isAiThinking) {
-                            item(key = "typing") {
-                                TypingIndicator(modifier = Modifier.animateItem())
+                            // Typing indicator
+                            if (uiState.isAiThinking) {
+                                item(key = "typing") {
+                                    TypingIndicator(modifier = Modifier.animateItem())
+                                }
                             }
                         }
                     }
@@ -486,7 +689,6 @@ fun ChatScreen(
     // Error snackbar
     uiState.error?.let { error ->
         LaunchedEffect(error) {
-            // Auto-dismiss after 3 seconds
             kotlinx.coroutines.delay(3000)
             viewModel.dismissError()
         }
@@ -712,7 +914,7 @@ private fun ChatTopBar(
     TopAppBar(
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // AI avatar (Friday holographic cube/circle)
+                // AI avatar
                 Box(
                     modifier = Modifier
                         .size(36.dp)
@@ -744,7 +946,7 @@ private fun ChatTopBar(
                     Text(
                         text = when {
                             isAiThinking -> "ANALYZING..."
-                            else -> when(aiSource) {
+                            else -> when (aiSource) {
                                 "ollama" -> "LOCAL SECURE"
                                 "gemini" -> "CLOUD LINK"
                                 else -> "OFFLINE CORE"
@@ -837,16 +1039,18 @@ private fun ChatInputBar(
     onQuickActionsClick: () -> Unit
 ) {
     Surface(
-        color = Color(0xFF111827).copy(alpha = 0.8f),
-        shadowElevation = 8.dp,
-        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.15f))
+        color = Color(0xFF111827).copy(alpha = 0.85f),
+        border = BorderStroke(1.dp, Color(0xFF00F0FF).copy(alpha = 0.15f)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .neonShadow(color = Color(0xFF00F0FF).copy(alpha = 0.25f), borderRadius = 0.dp, glowRadius = 12.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-                .navigationBarsPadding(),
-            verticalAlignment = Alignment.Bottom
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
             // Quick Actions Button
             Box(
@@ -898,7 +1102,7 @@ private fun ChatInputBar(
 
             Spacer(Modifier.width(8.dp))
 
-            // Camera Button next to the send/voice button
+            // Camera Button
             Box(
                 modifier = Modifier
                     .size(48.dp)
@@ -921,14 +1125,12 @@ private fun ChatInputBar(
 
             // Voice / Send button
             if (inputText.isBlank()) {
-                // Voice button
                 VoiceButton(
                     isListening = isListening,
                     onClick = onVoiceClick,
                     modifier = Modifier.padding(bottom = 2.dp)
                 )
             } else {
-                // Send button
                 Box(
                     modifier = Modifier
                         .size(48.dp)
@@ -968,9 +1170,17 @@ private fun QuickActionCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val cardModifier = if (active) {
+        modifier
+            .height(72.dp)
+            .neonShadow(color = Color(0xFF00F0FF).copy(alpha = 0.5f), borderRadius = 16.dp, glowRadius = 8.dp)
+    } else {
+        modifier.height(72.dp)
+    }
+
     Card(
         onClick = onClick,
-        modifier = modifier.height(72.dp),
+        modifier = cardModifier,
         shape = RoundedCornerShape(16.dp),
         border = if (active) BorderStroke(1.dp, Color(0xFF00F0FF)) else null,
         colors = CardDefaults.cardColors(
@@ -1021,5 +1231,41 @@ private fun QuickActionCard(
                 )
             }
         }
+    }
+}
+
+// Reusable cached framework Paint and RectF objects to eliminate GC churn on draw
+private val cachedGlowPaint = android.graphics.Paint().apply {
+    isAntiAlias = true
+    style = android.graphics.Paint.Style.FILL
+}
+private val cachedRectF = android.graphics.RectF()
+private var cachedGlowRadius = -1f
+private var cachedBlurFilter: android.graphics.BlurMaskFilter? = null
+
+/**
+ * High-performance neon glow shadow modifier using reusable Paint & BlurMaskFilter.
+ * Zero allocations per frame.
+ */
+fun Modifier.neonShadow(
+    color: Color = Color(0xFF00F0FF),
+    borderRadius: Dp = 16.dp,
+    glowRadius: Dp = 12.dp
+): Modifier = this.drawBehind {
+    val glowPx = glowRadius.toPx()
+    if (glowPx <= 0f) return@drawBehind
+
+    cachedGlowPaint.color = color.toArgb()
+
+    if (cachedGlowRadius != glowPx) {
+        cachedGlowRadius = glowPx
+        cachedBlurFilter = android.graphics.BlurMaskFilter(glowPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    cachedGlowPaint.maskFilter = cachedBlurFilter
+
+    drawIntoCanvas { canvas ->
+        cachedRectF.set(0f, 0f, size.width, size.height)
+        val cornerPx = borderRadius.toPx()
+        canvas.nativeCanvas.drawRoundRect(cachedRectF, cornerPx, cornerPx, cachedGlowPaint)
     }
 }
