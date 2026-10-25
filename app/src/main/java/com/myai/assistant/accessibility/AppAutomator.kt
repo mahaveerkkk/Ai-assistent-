@@ -479,17 +479,7 @@ class AppAutomator(
     /**
      * Content description se element click karo
      */
-    fun clickByContentDescription(desc: String): Boolean {
-        val root = service.rootInActiveWindow ?: return false
-        val nodes = root.findAccessibilityNodeInfosByText(desc)
-        for (node in nodes) {
-            val nodeDesc = node.contentDescription?.toString()
-            if (nodeDesc != null && nodeDesc.contains(desc, ignoreCase = true)) {
-                return actionPerformer.clickNode(node)
-            }
-        }
-        return actionPerformer.clickByText(desc)
-    }
+    fun clickByContentDescription(desc: String): Boolean = actionPerformer.clickByContentDescription(desc)
 
     private fun String.containsAny(vararg keywords: String): Boolean {
         return keywords.any { this.contains(it) }

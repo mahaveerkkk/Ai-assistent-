@@ -336,7 +336,7 @@ fun FridayOrb(
     // Success expansion shockwave
     val successProgress by animateFloatAsState(
         targetValue = if (isSuccess) 1f else 0f,
-        animationSpec = tween(durationMillis = 800, easing = DecelerateEasing),
+        animationSpec = tween(durationMillis = 800, easing = LinearOutSlowInEasing),
         label = "success_progress"
     )
 
