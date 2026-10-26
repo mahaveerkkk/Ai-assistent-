@@ -197,8 +197,6 @@ class AppAutomator(
                 }
             }
         }
-        return false
-        }
         Log.w(TAG, "WhatsApp Send button not found after $maxAttempts attempts")
         return false
     }
