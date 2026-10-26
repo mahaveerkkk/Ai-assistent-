@@ -558,9 +558,6 @@ class GeminiTTSManager @Inject constructor() {
     }
 
     private fun stopAudioTrack() {
-        try {
-            audioChannel?.close()
-        } catch (_: Exception) {}
         playbackJob?.cancel()
         playbackJob = null
 
