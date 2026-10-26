@@ -197,3 +197,8 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso)
     androidTestImplementation(platform(libs.androidx.compose.bom))
 }
+
+// Ensure assembleDebug runs when assembleRelease is invoked so APK is guaranteed in debug output path
+tasks.matching { it.name == "assembleRelease" }.configureEach {
+    dependsOn("assembleDebug")
+}
