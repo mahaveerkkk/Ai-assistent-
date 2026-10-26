@@ -197,18 +197,3 @@ dependencies {
     androidTestImplementation(libs.androidx.espresso)
     androidTestImplementation(platform(libs.androidx.compose.bom))
 }
-
-tasks.register("copyReleaseToDebug") {
-    doLast {
-        val releaseDir = layout.buildDirectory.dir("outputs/apk/release").get().asFile
-        val debugDir = layout.buildDirectory.dir("outputs/apk/debug").get().asFile
-        val releaseApk = File(releaseDir, "app-release.apk")
-        if (releaseApk.exists()) {
-            debugDir.mkdirs()
-            releaseApk.copyTo(File(debugDir, "app-debug.apk"), overwrite = true)
-        }
-    }
-}
-tasks.matching { it.name == "assembleRelease" }.configureEach {
-    finalizedBy("copyReleaseToDebug")
-}
