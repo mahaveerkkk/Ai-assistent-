@@ -13,6 +13,7 @@ import com.myai.assistant.ai.models.AiParsedResponse
 import com.myai.assistant.ai.models.AiResponseParser
 import com.myai.assistant.ai.models.AiSource
 import com.myai.assistant.ai.models.SYSTEM_PROMPT
+import com.myai.assistant.data.repository.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,7 +29,9 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class GroqClient @Inject constructor() {
+class GroqClient @Inject constructor(
+    private val settingsRepository: SettingsRepository
+) {
 
     companion object {
         private const val TAG = "GroqClient"
@@ -47,10 +50,18 @@ class GroqClient @Inject constructor() {
     var apiKey: String = BuildConfig.GROQ_API_KEY
     var model: String = DEFAULT_MODEL
 
+    init {
+        val savedKey = settingsRepository.groqApiKey.trim().removeSurrounding("\"").removeSurrounding("'")
+        if (savedKey.isNotBlank()) {
+            apiKey = savedKey
+            Log.d(TAG, "GroqClient initialized with saved key (len: ${apiKey.length})")
+        }
+    }
+
     fun isAvailable(): Boolean = apiKey.isNotBlank()
 
     fun updateApiKey(key: String) {
-        apiKey = key.trim()
+        apiKey = key.trim().removeSurrounding("\"").removeSurrounding("'")
         Log.d(TAG, "Groq API key updated (length: ${apiKey.length})")
     }
 

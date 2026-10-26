@@ -24,6 +24,7 @@ class GeminiClient @Inject constructor() {
     companion object {
         private const val TAG = "GeminiClient"
         const val DEFAULT_MODEL = "gemini-2.0-flash"
+        const val FALLBACK_MODEL = "gemini-1.5-flash"
     }
 
     var apiKey: String = BuildConfig.GEMINI_API_KEY  // from local.properties via BuildConfig
@@ -34,7 +35,7 @@ class GeminiClient @Inject constructor() {
     private var generativeModel: GenerativeModel? = null
 
     init {
-        val initialKey = apiKey.trim()
+        val initialKey = apiKey.trim().removeSurrounding("\"").removeSurrounding("'")
         if (initialKey.isNotEmpty()) {
             if (initialKey.contains(",")) {
                 setApiKeys(initialKey)
@@ -50,7 +51,7 @@ class GeminiClient @Inject constructor() {
     @Synchronized
     fun setApiKeys(keysCommaSeparated: String) {
         val parsed = keysCommaSeparated.split(",")
-            .map { it.trim() }
+            .map { it.trim().removeSurrounding("\"").removeSurrounding("'") }
             .filter { it.isNotBlank() }
 
         if (parsed.isNotEmpty()) {
@@ -65,7 +66,7 @@ class GeminiClient @Inject constructor() {
     /** Runtime key update */
     @Synchronized
     fun updateApiKey(key: String) {
-        val trimmed = key.trim()
+        val trimmed = key.trim().removeSurrounding("\"").removeSurrounding("'")
         if (trimmed.contains(",")) {
             setApiKeys(trimmed)
         } else {
@@ -194,7 +195,35 @@ class GeminiClient @Inject constructor() {
             )
 
             // Message bhejo
-            val response = chat.sendMessage(userMessage.trim())
+            val response = try {
+                chat.sendMessage(userMessage.trim())
+            } catch (e: Exception) {
+                if (e.message?.contains("not found", ignoreCase = true) == true ||
+                    e.message?.contains("404", ignoreCase = true) == true) {
+                    Log.w(TAG, "Model $DEFAULT_MODEL not found, retrying with $FALLBACK_MODEL...")
+                    val fallbackModel = GenerativeModel(
+                        modelName = FALLBACK_MODEL,
+                        apiKey = apiKey,
+                        generationConfig = generationConfig {
+                            temperature = 0.2f
+                            topP = 0.9f
+                            maxOutputTokens = 1024
+                            responseMimeType = "application/json"
+                        },
+                        systemInstruction = content { text(SYSTEM_PROMPT.trimIndent()) }
+                    )
+                    val fallbackChat = fallbackModel.startChat(
+                        history = finalHistory.map { (role, textContent) ->
+                            content(role = role) {
+                                text(textContent)
+                            }
+                        }
+                    )
+                    fallbackChat.sendMessage(userMessage.trim())
+                } else {
+                    throw e
+                }
+            }
             val responseText = response.text?.trim().orEmpty()
 
             if (responseText.isBlank()) {

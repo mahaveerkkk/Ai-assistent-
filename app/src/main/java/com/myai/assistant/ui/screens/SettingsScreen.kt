@@ -41,6 +41,8 @@ fun SettingsScreen(
     // States initialized from settings repository
     var ollamaUrl by remember { mutableStateOf(settings.ollamaUrl) }
     var ollamaModel by remember { mutableStateOf(settings.ollamaModel) }
+    var groqApiKey by remember { mutableStateOf(settings.groqApiKey) }
+    var useGroq by remember { mutableStateOf(settings.useGroq) }
     var geminiApiKey by remember { mutableStateOf(settings.geminiApiKey) }
     var geminiBackupApiKey by remember { mutableStateOf(settings.geminiBackupApiKey) }
     var useOllama by remember { mutableStateOf(settings.useOllama) }
@@ -142,9 +144,33 @@ fun SettingsScreen(
                 HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
 
                 SettingsToggle(
+                    icon = Icons.Filled.Bolt,
+                    title = "Groq (Llama 3.3 70B)",
+                    subtitle = "Ultra-fast JSON command inference (~150ms)",
+                    checked = useGroq,
+                    onToggle = {
+                        useGroq = it
+                        viewModel.setUseGroq(it)
+                    }
+                )
+
+                if (useGroq) {
+                    SettingsTextField(
+                        label = "Groq API Key (starts with gsk_...)",
+                        value = groqApiKey,
+                        onChange = {
+                            groqApiKey = it
+                            viewModel.setGroqApiKey(it)
+                        }
+                    )
+                }
+
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                SettingsToggle(
                     icon = Icons.Filled.Cloud,
                     title = "Gemini (Cloud)",
-                    subtitle = "Google AI fallback",
+                    subtitle = "Google AI Live & multi-modal fallback",
                     checked = useGemini,
                     onToggle = {
                         useGemini = it
@@ -154,7 +180,7 @@ fun SettingsScreen(
 
                 if (useGemini) {
                     SettingsTextField(
-                        label = "Primary Gemini API Key (Brain 1)",
+                        label = "Primary Gemini API Key (starts with AIzaSy...)",
                         value = geminiApiKey,
                         onChange = {
                             geminiApiKey = it
@@ -162,7 +188,7 @@ fun SettingsScreen(
                         }
                     )
                     SettingsTextField(
-                        label = "Backup Gemini API Key (Brain 2 / Failover)",
+                        label = "Backup Gemini API Key (Failover)",
                         value = geminiBackupApiKey,
                         onChange = {
                             geminiBackupApiKey = it

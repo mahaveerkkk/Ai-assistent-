@@ -47,11 +47,19 @@ class AIClient @Inject constructor(
         } else {
             geminiClient.updateApiKey(allKeys)
         }
+        val savedGroqKey = settingsRepository.groqApiKey
+        if (savedGroqKey.isNotBlank()) {
+            groqClient.updateApiKey(savedGroqKey)
+        }
     }
 
     // ═══════════════════════════════════════
     // CONFIGURATION FLAGS
     // ═══════════════════════════════════════
+    var useGroq: Boolean
+        get() = settingsRepository.useGroq
+        set(value) { settingsRepository.useGroq = value }
+
     var useLocalOllama: Boolean
         get() = settingsRepository.useOllama
         set(value) { settingsRepository.useOllama = value }
@@ -78,13 +86,21 @@ class AIClient @Inject constructor(
         ollamaClient.model = model
     }
 
+    // Groq config
+    fun setGroqApiKey(key: String) {
+        val sanitized = key.trim().removeSurrounding("\"").removeSurrounding("'")
+        settingsRepository.groqApiKey = sanitized
+        groqClient.updateApiKey(sanitized)
+    }
+
     // Gemini config — supports multiple keys comma-separated for rotation
     fun setGeminiApiKey(key: String) {
-        settingsRepository.geminiApiKey = key
-        if (key.contains(",")) {
-            geminiClient.setApiKeys(key)
+        val sanitized = key.trim().removeSurrounding("\"").removeSurrounding("'")
+        settingsRepository.geminiApiKey = sanitized
+        if (sanitized.contains(",")) {
+            geminiClient.setApiKeys(sanitized)
         } else {
-            geminiClient.updateApiKey(key)
+            geminiClient.updateApiKey(sanitized)
         }
     }
 
@@ -180,10 +196,12 @@ class AIClient @Inject constructor(
             }
         }
 
+        var lastCloudError: String? = null
+
         // ═══════════════════════════════════════════════════════
         // STRATEGY 2: Groq (Ultra-fast Llama 3.3 70B ~150ms)
         // ═══════════════════════════════════════════════════════
-        if (groqClient.isAvailable()) {
+        if (useGroq && groqClient.isAvailable()) {
             Log.d(TAG, "⚡ [2/4] Trying Groq (Llama 3.3 70B)...")
             try {
                 val groqResponse = groqClient.chat(enrichedMessage, historyPairs)
@@ -192,8 +210,10 @@ class AIClient @Inject constructor(
                     return groqResponse
                 }
                 Log.w(TAG, "❌ Groq unsuccessful: ${groqResponse.error}")
+                lastCloudError = groqResponse.error
             } catch (e: Exception) {
                 Log.w(TAG, "❌ Groq exception: ${e.message}")
+                lastCloudError = e.message
             }
         }
 
@@ -228,8 +248,10 @@ class AIClient @Inject constructor(
                     return geminiResponse
                 }
                 Log.w(TAG, "❌ Gemini unsuccessful: ${geminiResponse.error}")
+                lastCloudError = geminiResponse.error
             } catch (e: Exception) {
                 Log.e(TAG, "❌ Gemini exception: ${e.message}", e)
+                lastCloudError = e.message
             }
         } else {
             Log.w(TAG, "⚠️ Gemini not available (key blank: ${!geminiClient.isAvailable()})")
@@ -239,7 +261,7 @@ class AIClient @Inject constructor(
         // STRATEGY 4: Offline Regex Fallback (Device control without AI)
         // ═══════════════════════════════════════════════════════
         Log.w(TAG, "⚠️ [4/4] Cloud/Local AI engines unavailable, executing Offline Regex Fallback")
-        return offlineFallback(userMessage)
+        return offlineFallback(userMessage, lastCloudError)
     }
 
     /**
@@ -255,7 +277,7 @@ class AIClient @Inject constructor(
         }
 
         // 2. Groq (150ms agent loop)
-        if (groqClient.isAvailable()) {
+        if (useGroq && groqClient.isAvailable()) {
             try {
                 val response = groqClient.chat(agentPrompt, emptyList())
                 if (response.isSuccess && response.action != "ERROR") return response
@@ -282,13 +304,13 @@ class AIClient @Inject constructor(
         }
 
         // 5. Offline fallback
-        return offlineFallback(agentPrompt)
+        return offlineFallback(agentPrompt, null)
     }
 
     /**
      * Offline Regex Fallback — Robust local device control when no AI model is reachable.
      */
-    private fun offlineFallback(userMessage: String): AiParsedResponse {
+    private fun offlineFallback(userMessage: String, lastCloudError: String? = null): AiParsedResponse {
         val trimmed = userMessage.trim()
         val lower = trimmed.lowercase()
 
@@ -410,6 +432,11 @@ class AIClient @Inject constructor(
                 "Main hoon MyAI Assistant! 🤖 Phone ko control karne ke liye hamesha taiyar."
             lower.containsAny("thank", "shukriya", "dhanyavad") ->
                 "Arey koi baat nahi, shukriya! 😊🙏"
+            !lastCloudError.isNullOrBlank() ->
+                "⚠️ AI Error: $lastCloudError\n\n" +
+                "Tip: Kripya Settings mein API Key check karein:\n" +
+                "• Gemini Key 'AIzaSy...' se start hoti hai\n" +
+                "• Groq Key 'gsk_...' se start hoti hai"
             else ->
                 "⚠️ Offline Mode: AI connection uplabdh nahi hai.\n\n" +
                 "Aap basic commands chala sakte hain jaise 'Torch on', 'Volume up', 'Alarm 7 baje', 'Open WhatsApp' etc."
@@ -422,15 +449,17 @@ class AIClient @Inject constructor(
      * Check which AI services are available
      */
     suspend fun checkAvailability(): Map<String, Boolean> {
-        val ollamaAvailable = try {
-            ollamaClient.isServerAvailable()
-        } catch (e: Exception) {
-            Log.w(TAG, "Ollama check failed: ${e.message}")
-            false
-        }
+        val ollamaAvailable = if (useLocalOllama) {
+            try {
+                ollamaClient.isServerAvailable()
+            } catch (e: Exception) {
+                Log.w(TAG, "Ollama check failed: ${e.message}")
+                false
+            }
+        } else false
 
-        val geminiAvailable = geminiClient.isAvailable()
-        val groqAvailable = groqClient.isAvailable()
+        val geminiAvailable = useGeminiFallback && geminiClient.isAvailable()
+        val groqAvailable = useGroq && groqClient.isAvailable()
 
         Log.d(TAG, "📊 Availability — Groq: $groqAvailable, Gemini: $geminiAvailable, Ollama: $ollamaAvailable")
 

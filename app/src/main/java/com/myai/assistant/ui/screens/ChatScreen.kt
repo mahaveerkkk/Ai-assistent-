@@ -921,8 +921,22 @@ private fun ChatTopBar(
                         .background(
                             brush = Brush.linearGradient(
                                 listOf(
-                                    Color(0xFF00F0FF),
-                                    Color(0xFFD000FF)
+                                    when (aiSource) {
+                                        "groq" -> Color(0xFFF59E0B)
+                                        "gemini" -> Color(0xFF00F0FF)
+                                        "ollama" -> SuccessColor
+                                        "litert" -> Color(0xFFA855F7)
+                                        "shortcut" -> Color(0xFF10B981)
+                                        else -> Color(0xFF6B7280)
+                                    },
+                                    when (aiSource) {
+                                        "groq" -> Color(0xFFEF4444)
+                                        "gemini" -> Color(0xFFD000FF)
+                                        "ollama" -> Color(0xFF06B6D4)
+                                        "litert" -> Color(0xFF6366F1)
+                                        "shortcut" -> Color(0xFF059669)
+                                        else -> Color(0xFF374151)
+                                    }
                                 )
                             ),
                             shape = RoundedCornerShape(12.dp)
@@ -947,16 +961,22 @@ private fun ChatTopBar(
                         text = when {
                             isAiThinking -> "ANALYZING..."
                             else -> when (aiSource) {
+                                "groq" -> "GROQ ULTRA (150ms)"
+                                "gemini" -> "GEMINI CLOUD"
                                 "ollama" -> "LOCAL SECURE"
-                                "gemini" -> "CLOUD LINK"
+                                "litert" -> "ON-DEVICE AI"
+                                "shortcut" -> "SYSTEM CORE"
                                 else -> "OFFLINE CORE"
                             }
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = when {
                             isAiThinking -> WarningColor
-                            aiSource == "ollama" -> SuccessColor
+                            aiSource == "groq" -> Color(0xFFF59E0B)
                             aiSource == "gemini" -> Color(0xFF00F0FF)
+                            aiSource == "ollama" -> SuccessColor
+                            aiSource == "litert" -> Color(0xFFA855F7)
+                            aiSource == "shortcut" -> Color(0xFF10B981)
                             else -> Color.Gray
                         },
                         fontSize = 9.sp,

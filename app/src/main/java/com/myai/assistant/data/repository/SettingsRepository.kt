@@ -26,6 +26,8 @@ class SettingsRepository @Inject constructor(
         const val KEY_OLLAMA_MODEL = "ollama_model"
         const val KEY_GEMINI_API_KEY = "gemini_api_key"
         const val KEY_GEMINI_BACKUP_API_KEY = "gemini_backup_api_key"
+        const val KEY_GROQ_API_KEY = "groq_api_key"
+        const val KEY_USE_GROQ = "use_groq"
         const val KEY_USE_OLLAMA = "use_ollama"
         const val KEY_USE_GEMINI = "use_gemini"
         const val KEY_USE_LITERT = "use_litert"
@@ -47,6 +49,8 @@ class SettingsRepository @Inject constructor(
         private val PREF_KEY_OLLAMA_MODEL = stringPreferencesKey(KEY_OLLAMA_MODEL)
         private val PREF_KEY_GEMINI_API_KEY = stringPreferencesKey(KEY_GEMINI_API_KEY)
         private val PREF_KEY_GEMINI_BACKUP_API_KEY = stringPreferencesKey(KEY_GEMINI_BACKUP_API_KEY)
+        private val PREF_KEY_GROQ_API_KEY = stringPreferencesKey(KEY_GROQ_API_KEY)
+        private val PREF_KEY_USE_GROQ = booleanPreferencesKey(KEY_USE_GROQ)
         private val PREF_KEY_USE_OLLAMA = booleanPreferencesKey(KEY_USE_OLLAMA)
         private val PREF_KEY_USE_GEMINI = booleanPreferencesKey(KEY_USE_GEMINI)
         private val PREF_KEY_USE_LITERT = booleanPreferencesKey(KEY_USE_LITERT)
@@ -131,6 +135,28 @@ class SettingsRepository @Inject constructor(
         get() {
             val keys = listOf(geminiApiKey, geminiBackupApiKey).filter { it.isNotBlank() }
             return keys.joinToString(",")
+        }
+
+    // Groq API Key (Llama 3.3 70B ~150ms)
+    var groqApiKey: String
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_GROQ_API_KEY] ?: BuildConfig.GROQ_API_KEY }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_GROQ_API_KEY] = value.trim() }
+            }
+        }
+
+    // Use Groq (Cloud ultra-fast)
+    var useGroq: Boolean
+        get() = runBlocking {
+            dataStore.data.map { it[PREF_KEY_USE_GROQ] ?: true }.first()
+        }
+        set(value) {
+            runBlocking {
+                dataStore.edit { it[PREF_KEY_USE_GROQ] = value }
+            }
         }
 
     // Use Ollama (Local)

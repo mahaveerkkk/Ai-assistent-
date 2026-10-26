@@ -327,18 +327,47 @@ class AssistantViewModel @Inject constructor(
     fun setOllamaUrl(url: String) = aiClient.setOllamaUrl(url)
     fun setOllamaModel(model: String) = aiClient.setOllamaModel(model)
 
+    fun setGroqApiKey(key: String) {
+        val sanitized = key.trim().removeSurrounding("\"").removeSurrounding("'")
+        aiClient.setGroqApiKey(sanitized)
+        refreshAiAvailability()
+    }
+
+    fun setUseGroq(use: Boolean) {
+        aiClient.useGroq = use
+        refreshAiAvailability()
+    }
+
     fun setGeminiApiKey(key: String) {
-        settings.geminiApiKey = key
+        val sanitized = key.trim().removeSurrounding("\"").removeSurrounding("'")
+        settings.geminiApiKey = sanitized
         aiClient.setGeminiApiKey(settings.allGeminiApiKeys)
+        geminiTts.updateApiKey(sanitized.substringBefore(","))
+        refreshAiAvailability()
     }
 
     fun setGeminiBackupApiKey(key: String) {
-        settings.geminiBackupApiKey = key
+        val sanitized = key.trim().removeSurrounding("\"").removeSurrounding("'")
+        settings.geminiBackupApiKey = sanitized
         aiClient.setGeminiApiKey(settings.allGeminiApiKeys)
+        refreshAiAvailability()
     }
 
-    fun setUseOllama(use: Boolean) { aiClient.useLocalOllama = use }
-    fun setUseGemini(use: Boolean) { aiClient.useGeminiFallback = use }
+    fun setUseOllama(use: Boolean) {
+        aiClient.useLocalOllama = use
+        refreshAiAvailability()
+    }
+
+    fun setUseGemini(use: Boolean) {
+        aiClient.useGeminiFallback = use
+        refreshAiAvailability()
+    }
+
+    fun refreshAiAvailability() {
+        viewModelScope.launch {
+            checkAiAvailability()
+        }
+    }
 
     private suspend fun sendWelcomeMessage() {
         chatRepository.saveAiResponse(
@@ -356,8 +385,9 @@ class AssistantViewModel @Inject constructor(
     private suspend fun checkAiAvailability() {
         val availability = aiClient.checkAvailability()
         val source = when {
-            availability["ollama"] == true -> "ollama"
+            availability["groq"] == true -> "groq"
             availability["gemini"] == true -> "gemini"
+            availability["ollama"] == true -> "ollama"
             else -> "offline"
         }
         assistantBrain.setAiSource(source)

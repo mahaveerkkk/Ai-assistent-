@@ -16,6 +16,7 @@ import android.speech.tts.UtteranceProgressListener
 import android.util.Base64
 import android.util.Log
 import com.myai.assistant.BuildConfig
+import com.myai.assistant.data.repository.SettingsRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,7 +43,9 @@ import javax.inject.Singleton
  * Fallback: Android TextToSpeech (offline / network dropped)
  */
 @Singleton
-class GeminiTTSManager @Inject constructor() {
+class GeminiTTSManager @Inject constructor(
+    private val settingsRepository: SettingsRepository
+) {
 
     companion object {
         private const val TAG = "GeminiTTS"
@@ -74,6 +77,14 @@ class GeminiTTSManager @Inject constructor() {
     // Config
     var voiceName: String = VOICE_KORE
     var apiKey: String = BuildConfig.GEMINI_API_KEY
+
+    init {
+        val savedKey = settingsRepository.geminiApiKey.trim().removeSurrounding("\"").removeSurrounding("'")
+        if (savedKey.isNotBlank()) {
+            apiKey = savedKey.substringBefore(",").trim()
+            Log.d(TAG, "GeminiTTS initialized with saved key (len: ${apiKey.length})")
+        }
+    }
 
     // WebSocket connection
     @Volatile
@@ -691,7 +702,14 @@ class GeminiTTSManager @Inject constructor() {
     }
 
     fun updateApiKey(key: String) {
-        apiKey = key
+        apiKey = key.trim().removeSurrounding("\"").removeSurrounding("'").substringBefore(",")
+        // Reset WebSocket so next utterance connects with new key
+        try {
+            webSocket?.close(1000, "API key changed")
+        } catch (_: Exception) {}
+        webSocket = null
+        isSetupDone.set(false)
+        Log.d(TAG, "GeminiTTS API key updated (len: ${apiKey.length})")
     }
 
     fun updateVoice(voice: String) {
