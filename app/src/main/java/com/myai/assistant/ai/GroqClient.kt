@@ -36,7 +36,13 @@ class GroqClient @Inject constructor(
     companion object {
         private const val TAG = "GroqClient"
         private const val GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-        const val DEFAULT_MODEL = "llama-3.3-70b-versatile"
+        const val DEFAULT_MODEL = "openai/gpt-oss-120b"
+        val FALLBACK_MODELS = listOf(
+            "openai/gpt-oss-120b",
+            "openai/gpt-oss-20b",
+            "qwen/qwen3.8-27b",
+            "llama-3.3-70b-versatile"
+        )
     }
 
     private val gson = Gson()
@@ -101,74 +107,96 @@ class GroqClient @Inject constructor(
                 addProperty("content", userMessage.trim())
             })
 
-            // 4. Request payload with JSON object enforcement
-            val requestBodyJson = JsonObject().apply {
-                addProperty("model", model.ifBlank { DEFAULT_MODEL })
-                add("messages", messagesArray)
-                addProperty("temperature", 0.2) // Low temperature for consistent JSON structured output
-                addProperty("max_tokens", 1024)
-                add("response_format", JsonObject().apply {
-                    addProperty("type", "json_object")
-                })
+            // 4. Request payload with dynamic model fallback and User-Agent header
+            val modelsToTry = mutableListOf(model.ifBlank { DEFAULT_MODEL })
+            for (m in FALLBACK_MODELS) {
+                if (!modelsToTry.contains(m)) modelsToTry.add(m)
             }
 
-            val request = Request.Builder()
-                .url(GROQ_URL)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .addHeader("Content-Type", "application/json")
-                .post(requestBodyJson.toString().toRequestBody("application/json".toMediaType()))
-                .build()
+            var lastResponse: AiParsedResponse? = null
+            for (currentModel in modelsToTry) {
+                val requestBodyJson = JsonObject().apply {
+                    addProperty("model", currentModel)
+                    add("messages", messagesArray)
+                    addProperty("temperature", 0.2) // Low temperature for consistent JSON structured output
+                    addProperty("max_tokens", 1024)
+                    add("response_format", JsonObject().apply {
+                        addProperty("type", "json_object")
+                    })
+                }
 
-            Log.d(TAG, "⚡ Sending request to Groq ($model)...")
-            val startTime = System.currentTimeMillis()
+                val request = Request.Builder()
+                    .url(GROQ_URL)
+                    .addHeader("Authorization", "Bearer $apiKey")
+                    .addHeader("Content-Type", "application/json")
+                    .addHeader("User-Agent", "MyAI-Assistant-Android/1.0")
+                    .post(requestBodyJson.toString().toRequestBody("application/json".toMediaType()))
+                    .build()
 
-            httpClient.newCall(request).execute().use { response ->
-                val durationMs = System.currentTimeMillis() - startTime
-                val responseBodyStr = response.body?.string().orEmpty()
+                Log.d(TAG, "⚡ Sending request to Groq ($currentModel)...")
+                val startTime = System.currentTimeMillis()
 
-                if (!response.isSuccessful) {
-                    val parsedError = parseGroqError(responseBodyStr, response.code)
-                    Log.e(TAG, "Groq HTTP ${response.code} ($durationMs ms): $parsedError")
+                var tryNextModel = false
+                httpClient.newCall(request).execute().use { response ->
+                    val durationMs = System.currentTimeMillis() - startTime
+                    val responseBodyStr = response.body?.string().orEmpty()
 
-                    return@withContext when (response.code) {
-                        429 -> AiResponseParser.errorResponse(
-                            "Groq rate limit exceeded (429). Please wait a moment or check quota.",
-                            AiSource.GROQ
-                        )
-                        401, 403 -> AiResponseParser.errorResponse(
-                            "Groq authentication failed (${response.code}): Invalid API Key.",
-                            AiSource.GROQ
-                        )
-                        else -> AiResponseParser.errorResponse(
-                            "Groq error ${response.code}: $parsedError",
-                            AiSource.GROQ
-                        )
+                    if (!response.isSuccessful) {
+                        val parsedError = parseGroqError(responseBodyStr, response.code)
+                        Log.e(TAG, "Groq HTTP ${response.code} ($durationMs ms) on $currentModel: $parsedError")
+
+                        if (response.code == 404 && parsedError.contains("model", ignoreCase = true)) {
+                            Log.w(TAG, "Model $currentModel not found on Groq, trying next fallback...")
+                            lastResponse = AiResponseParser.errorResponse("Groq model error: $parsedError", AiSource.GROQ)
+                            tryNextModel = true
+                            return@use
+                        }
+
+                        return@withContext when (response.code) {
+                            429 -> AiResponseParser.errorResponse(
+                                "Groq rate limit exceeded (429). Please wait a moment or check quota.",
+                                AiSource.GROQ
+                            )
+                            401, 403 -> AiResponseParser.errorResponse(
+                                "Groq authentication failed (${response.code}): Invalid API Key.",
+                                AiSource.GROQ
+                            )
+                            else -> AiResponseParser.errorResponse(
+                                "Groq error ${response.code}: $parsedError",
+                                AiSource.GROQ
+                            )
+                        }
                     }
+
+                    if (responseBodyStr.isBlank()) {
+                        Log.e(TAG, "Groq returned empty response body ($durationMs ms)")
+                        return@withContext AiResponseParser.errorResponse("Empty response from Groq", AiSource.GROQ)
+                    }
+
+                    val jsonObject = JsonParser.parseString(responseBodyStr).asJsonObject
+                    val choices = jsonObject.getAsJsonArray("choices")
+                    if (choices == null || choices.size() == 0) {
+                        Log.e(TAG, "Groq choices array is empty ($durationMs ms)")
+                        return@withContext AiResponseParser.errorResponse("No completion choices from Groq", AiSource.GROQ)
+                    }
+
+                    val messageObj = choices[0].asJsonObject.getAsJsonObject("message")
+                    val replyText = messageObj?.get("content")?.asString.orEmpty()
+
+                    if (replyText.isBlank()) {
+                        Log.w(TAG, "Groq message content is blank ($durationMs ms)")
+                        return@withContext AiResponseParser.errorResponse("Blank response from Groq", AiSource.GROQ)
+                    }
+
+                    Log.d(TAG, "⚡ Groq response received via $currentModel in ${durationMs}ms (${replyText.length} chars)")
+                    model = currentModel
+                    return@withContext AiResponseParser.parse(replyText, AiSource.GROQ)
                 }
 
-                if (responseBodyStr.isBlank()) {
-                    Log.e(TAG, "Groq returned empty response body ($durationMs ms)")
-                    return@withContext AiResponseParser.errorResponse("Empty response from Groq", AiSource.GROQ)
-                }
-
-                val jsonObject = JsonParser.parseString(responseBodyStr).asJsonObject
-                val choices = jsonObject.getAsJsonArray("choices")
-                if (choices == null || choices.size() == 0) {
-                    Log.e(TAG, "Groq choices array is empty ($durationMs ms)")
-                    return@withContext AiResponseParser.errorResponse("No completion choices from Groq", AiSource.GROQ)
-                }
-
-                val messageObj = choices[0].asJsonObject.getAsJsonObject("message")
-                val replyText = messageObj?.get("content")?.asString.orEmpty()
-
-                if (replyText.isBlank()) {
-                    Log.w(TAG, "Groq message content is blank ($durationMs ms)")
-                    return@withContext AiResponseParser.errorResponse("Blank response from Groq", AiSource.GROQ)
-                }
-
-                Log.d(TAG, "⚡ Groq response received in ${durationMs}ms (${replyText.length} chars)")
-                AiResponseParser.parse(replyText, AiSource.GROQ)
+                if (!tryNextModel) break
             }
+
+            return@withContext lastResponse ?: AiResponseParser.errorResponse("All Groq models failed", AiSource.GROQ)
 
         } catch (e: SocketTimeoutException) {
             Log.e(TAG, "Groq timeout: ${e.message}")

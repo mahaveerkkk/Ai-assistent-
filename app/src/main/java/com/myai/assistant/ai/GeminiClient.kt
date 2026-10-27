@@ -23,8 +23,14 @@ class GeminiClient @Inject constructor() {
 
     companion object {
         private const val TAG = "GeminiClient"
-        const val DEFAULT_MODEL = "gemini-2.0-flash"
-        const val FALLBACK_MODEL = "gemini-1.5-flash"
+        const val DEFAULT_MODEL = "gemini-3.8-flash"
+        val FALLBACK_MODELS = listOf(
+            "gemini-3.8-flash",
+            "gemini-2.5-flash",
+            "gemini-flash-latest",
+            "gemini-2.0-flash",
+            "gemini-1.5-flash"
+        )
     }
 
     var apiKey: String = BuildConfig.GEMINI_API_KEY  // from local.properties via BuildConfig
@@ -185,24 +191,14 @@ class GeminiClient @Inject constructor() {
 
             Log.d(TAG, "Sending to Gemini ($DEFAULT_MODEL) — history: ${finalHistory.size} turns, prompt: '${userMessage.take(80)}'")
 
-            // Chat session banao with cleaned history
-            val chat = model.startChat(
-                history = finalHistory.map { (role, textContent) ->
-                    content(role = role) {
-                        text(textContent)
-                    }
-                }
-            )
+            // Message bhejo with multi-model fallback (3.8-flash -> 2.5-flash -> flash-latest)
+            var responseText = ""
+            var lastModelException: Exception? = null
 
-            // Message bhejo
-            val response = try {
-                chat.sendMessage(userMessage.trim())
-            } catch (e: Exception) {
-                if (e.message?.contains("not found", ignoreCase = true) == true ||
-                    e.message?.contains("404", ignoreCase = true) == true) {
-                    Log.w(TAG, "Model $DEFAULT_MODEL not found, retrying with $FALLBACK_MODEL...")
-                    val fallbackModel = GenerativeModel(
-                        modelName = FALLBACK_MODEL,
+            for (modelName in FALLBACK_MODELS) {
+                try {
+                    val currentModel = GenerativeModel(
+                        modelName = modelName,
                         apiKey = apiKey,
                         generationConfig = generationConfig {
                             temperature = 0.2f
@@ -212,21 +208,35 @@ class GeminiClient @Inject constructor() {
                         },
                         systemInstruction = content { text(SYSTEM_PROMPT.trimIndent()) }
                     )
-                    val fallbackChat = fallbackModel.startChat(
+                    val chat = currentModel.startChat(
                         history = finalHistory.map { (role, textContent) ->
                             content(role = role) {
                                 text(textContent)
                             }
                         }
                     )
-                    fallbackChat.sendMessage(userMessage.trim())
-                } else {
+                    val response = chat.sendMessage(userMessage.trim())
+                    val text = response.text?.trim().orEmpty()
+                    if (text.isNotBlank()) {
+                        responseText = text
+                        Log.d(TAG, "✅ Gemini success with model $modelName")
+                        break
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastModelException = e
+                    val msg = e.message?.lowercase().orEmpty()
+                    if (msg.contains("not found") || msg.contains("404") || msg.contains("not supported")) {
+                        Log.w(TAG, "Model $modelName not supported, trying next model in list...")
+                        continue
+                    }
                     throw e
                 }
             }
-            val responseText = response.text?.trim().orEmpty()
 
             if (responseText.isBlank()) {
+                if (lastModelException != null) throw lastModelException
                 Log.w(TAG, "Gemini returned blank response")
                 return@withContext AiResponseParser.errorResponse(
                     "Gemini se khaali response aaya",
@@ -243,9 +253,15 @@ class GeminiClient @Inject constructor() {
             Log.e(TAG, "Gemini error: ${e.message}", e)
 
             // 429 / Quota exhausted — seamless rotation & retry
-            if (isQuotaExhausted(e) && retryAttempt < (keyList.size - 1) && rotateToNextKey()) {
-                Log.w(TAG, "♻️ Quota exhausted, retrying with rotated key (attempt ${retryAttempt + 1})...")
-                return@withContext chatInternal(userMessage, chatHistory, retryAttempt + 1)
+            if (isQuotaExhausted(e)) {
+                if (retryAttempt < (keyList.size - 1) && rotateToNextKey()) {
+                    Log.w(TAG, "♻️ Quota exhausted, retrying with rotated key (attempt ${retryAttempt + 1})...")
+                    return@withContext chatInternal(userMessage, chatHistory, retryAttempt + 1)
+                }
+                return@withContext AiResponseParser.errorResponse(
+                    "Gemini quota exceed ho gaya hai (20 requests/day Free Tier limit). Kripya Groq use karein ya naya Gemini key dalein.",
+                    AiSource.GEMINI
+                )
             }
 
             AiResponseParser.errorResponse(
